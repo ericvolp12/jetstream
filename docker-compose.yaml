@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  jetstream:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: always
+    image: jetstream
+    container_name: jetstream
+    env_file:
+      - .env
+    ports:
+      - "6008:8080"

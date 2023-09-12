@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/klauspost/compress/zstd"
 	"github.com/labstack/echo/v4"
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/exp/slog"
 )
 
@@ -16,11 +17,13 @@ var (
 )
 
 type Subscriber struct {
-	ws     *websocket.Conn
-	seq    int64
-	buf    chan []byte
-	id     int64
-	format string
+	ws               *websocket.Conn
+	seq              int64
+	buf              chan []byte
+	id               int64
+	format           string
+	deliveredCounter prometheus.Counter
+	bytesCounter     prometheus.Counter
 }
 
 type Server struct {
@@ -50,6 +53,9 @@ func (s *Server) Emit(ctx context.Context, data []byte) error {
 	s.lk.RLock()
 	defer s.lk.RUnlock()
 
+	eventsEmitted.Inc()
+	bytesEmitted.Add(float64(len(data)))
+
 	zstdData := []byte{}
 
 	// Check if any subscribers want zstd
@@ -78,10 +84,11 @@ func (s *Server) Emit(ctx context.Context, data []byte) error {
 			if err != nil {
 				log.Error("failed to close subscriber connection", "error", err)
 			}
-
 			return nil
 		case sub.buf <- msg:
 			sub.seq++
+			sub.deliveredCounter.Inc()
+			sub.bytesCounter.Add(float64(len(msg)))
 		}
 	}
 	return nil
@@ -92,14 +99,18 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, format string) *Subscriber {
 	defer s.lk.Unlock()
 
 	sub := Subscriber{
-		ws:     ws,
-		buf:    make(chan []byte, 100),
-		id:     s.nextSub,
-		format: format,
+		ws:               ws,
+		buf:              make(chan []byte, 100),
+		id:               s.nextSub,
+		format:           format,
+		deliveredCounter: eventsDelivered.WithLabelValues(format, ws.RemoteAddr().String()),
+		bytesCounter:     bytesDelivered.WithLabelValues(format, ws.RemoteAddr().String()),
 	}
 
 	s.Subscribers[s.nextSub] = &sub
 	s.nextSub++
+
+	subscribersConnected.WithLabelValues(format, ws.RemoteAddr().String()).Inc()
 
 	slog.Info("adding subscriber", "remote_addr", ws.RemoteAddr().String(), "id", sub.id)
 
@@ -107,10 +118,12 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, format string) *Subscriber {
 }
 
 func (s *Server) RemoveSubscriber(num int64) {
-	slog.Info("removing subscriber", "id", num)
-
 	s.lk.Lock()
 	defer s.lk.Unlock()
+
+	slog.Info("removing subscriber", "id", num)
+
+	subscribersConnected.WithLabelValues(s.Subscribers[num].format, s.Subscribers[num].ws.RemoteAddr().String()).Dec()
 
 	delete(s.Subscribers, num)
 }

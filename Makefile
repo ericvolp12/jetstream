@@ -12,3 +12,8 @@ build:
 run:
 	@echo "Running Jetstream..."
 	$(GO_CMD) run cmd/jetstream/*.go
+
+.PHONY: up
+up:
+	@echo "Starting Jetstream..."
+	docker-compose up -d --build
