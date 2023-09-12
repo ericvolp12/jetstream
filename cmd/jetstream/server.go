@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"net"
 	"sync"
 	"time"
 
@@ -17,7 +16,7 @@ var (
 )
 
 type Subscriber struct {
-	con    net.Conn
+	ws     *websocket.Conn
 	seq    int64
 	buf    chan []byte
 	id     int64
@@ -73,7 +72,14 @@ func (s *Server) Emit(ctx context.Context, data []byte) error {
 		select {
 		case <-ctx.Done():
 			log.Error("failed to send event to subscriber", "error", ctx.Err(), "subscriber", sub.id)
-			return ctx.Err()
+
+			// If we failed to send to a subscriber, close the connection
+			err := sub.ws.Close()
+			if err != nil {
+				log.Error("failed to close subscriber connection", "error", err)
+			}
+
+			return nil
 		case sub.buf <- msg:
 			sub.seq++
 		}
@@ -81,12 +87,12 @@ func (s *Server) Emit(ctx context.Context, data []byte) error {
 	return nil
 }
 
-func (s *Server) AddSubscriber(con net.Conn, format string) *Subscriber {
+func (s *Server) AddSubscriber(ws *websocket.Conn, format string) *Subscriber {
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
 	sub := Subscriber{
-		con:    con,
+		ws:     ws,
 		buf:    make(chan []byte, 100),
 		id:     s.nextSub,
 		format: format,
@@ -95,7 +101,7 @@ func (s *Server) AddSubscriber(con net.Conn, format string) *Subscriber {
 	s.Subscribers[s.nextSub] = &sub
 	s.nextSub++
 
-	slog.Info("adding subscriber", "remote_addr", con.RemoteAddr().String(), "id", sub.id)
+	slog.Info("adding subscriber", "remote_addr", ws.RemoteAddr().String(), "id", sub.id)
 
 	return &sub
 }
@@ -139,7 +145,7 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		}
 	}()
 
-	sub := s.AddSubscriber(ws.UnderlyingConn(), format)
+	sub := s.AddSubscriber(ws, format)
 	defer s.RemoveSubscriber(sub.id)
 
 	for {
