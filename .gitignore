@@ -23,5 +23,4 @@
 # Go workspace file
 go.work
 
-jetstream
 cursor.json
