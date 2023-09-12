@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
+	"github.com/ericvolp12/jetstream/pkg/consumer"
 	"github.com/gorilla/websocket"
 	"github.com/klauspost/compress/zstd"
 	"github.com/labstack/echo/v4"
@@ -44,11 +48,19 @@ func ZstdCompress(src []byte) []byte {
 	return encoder.EncodeAll(src, make([]byte, 0, len(src)))
 }
 
-func (s *Server) Emit(ctx context.Context, data []byte) error {
+func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	ctx, span := tracer.Start(ctx, "Emit")
 	defer span.End()
 
 	log := slog.With("source", "server_emit")
+
+	asJSON := &bytes.Buffer{}
+	err := json.NewEncoder(asJSON).Encode(e)
+	if err != nil {
+		return fmt.Errorf("failed to encode event as json: %w", err)
+	}
+
+	data := asJSON.Bytes()
 
 	s.lk.RLock()
 	defer s.lk.RUnlock()

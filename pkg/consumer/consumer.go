@@ -29,7 +29,7 @@ import (
 type Consumer struct {
 	SocketURL string
 	Progress  *Progress
-	Emit      func(ctx context.Context, data []byte) error
+	Emit      func(context.Context, Event) error
 }
 
 // Progress is the cursor for the consumer
@@ -105,7 +105,7 @@ func NewConsumer(
 	ctx context.Context,
 	socketURL string,
 	progPath string,
-	emit func(ctx context.Context, data []byte) error,
+	emit func(context.Context, Event) error,
 ) (*Consumer, error) {
 	c := Consumer{
 		SocketURL: socketURL,
@@ -153,18 +153,11 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 			Did:    xe.RepoHandle.Did,
 			Seq:    xe.RepoHandle.Seq,
 			Type:   EvtUpdateRecord,
-			Record: xe.RepoHandle.Handle,
+			Handle: xe.RepoHandle.Handle,
 		}
-		asJSON := &bytes.Buffer{}
-		err = json.NewEncoder(asJSON).Encode(e)
-		if err != nil {
-			log.Error("failed to encode json", "error", err)
-			break
-		}
-		err = c.Emit(ctx, asJSON.Bytes())
+		err = c.Emit(ctx, e)
 		if err != nil {
 			log.Error("failed to emit json", "error", err)
-			break
 		}
 		lastEvtCreatedAtGauge.WithLabelValues(c.SocketURL).Set(float64(t.UnixNano()))
 		lastEvtProcessedAtGauge.WithLabelValues(c.SocketURL).Set(float64(now.UnixNano()))
@@ -270,18 +263,51 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 			}
 			// Emit the create
 			e := Event{
-				Did:    evt.Repo,
-				Seq:    evt.Seq,
-				Type:   EvtCreateRecord,
-				Record: rec,
+				Did:  evt.Repo,
+				Seq:  evt.Seq,
+				Type: EvtCreateRecord,
 			}
-			asJSON := &bytes.Buffer{}
-			err = json.NewEncoder(asJSON).Encode(e)
-			if err != nil {
-				log.Error("failed to encode json", "error", err)
+			switch rec := rec.(type) {
+			case *bsky.ActorProfile:
+				e.Profile = rec
+			case *bsky.FeedPost:
+				// Filter out empty embeds which get upset when marshalled to json
+				if rec.Embed != nil &&
+					rec.Embed.EmbedExternal == nil &&
+					rec.Embed.EmbedImages == nil &&
+					rec.Embed.EmbedRecord == nil {
+					rec.Embed = nil
+				}
+				if rec.Facets != nil {
+					facets := []*bsky.RichtextFacet{}
+					for i, f := range rec.Facets {
+						if f.Features != nil {
+							facets = append(facets, rec.Facets[i])
+						}
+					}
+					rec.Facets = facets
+				}
+				e.Post = rec
+			case *bsky.FeedLike:
+				e.Like = rec
+			case *bsky.FeedRepost:
+				e.Repost = rec
+			case *bsky.GraphFollow:
+				e.Follow = rec
+			case *bsky.GraphBlock:
+				e.Block = rec
+			case *bsky.GraphList:
+				e.List = rec
+			case *bsky.GraphListitem:
+				e.ListItem = rec
+			case *bsky.FeedGenerator:
+				e.FeedGenerator = rec
+			default:
+				log.Warn("unknown record type", "op", op.Path)
 				break
 			}
-			err = c.Emit(ctx, asJSON.Bytes())
+
+			err = c.Emit(ctx, e)
 			if err != nil {
 				log.Error("failed to emit json", "error", err)
 				break
@@ -313,19 +339,14 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				recordsProcessedCounter.WithLabelValues("actor_profile", c.SocketURL).Inc()
 				// Pack the record into an event
 				e := Event{
-					Did:    evt.Repo,
-					Seq:    evt.Seq,
-					Type:   EvtUpdateRecord,
-					Record: rec,
+					Did:     evt.Repo,
+					Seq:     evt.Seq,
+					Type:    EvtUpdateRecord,
+					Profile: rec,
 				}
-				asJSON := &bytes.Buffer{}
-				err := json.NewEncoder(asJSON).Encode(e)
-				if err != nil {
-					log.Error("failed to encode json", "error", err)
-					break
-				}
+
 				// Emit the event
-				err = c.Emit(ctx, asJSON.Bytes())
+				err = c.Emit(ctx, e)
 				if err != nil {
 					log.Error("failed to emit json", "error", err)
 					break
@@ -334,18 +355,13 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 		case repomgr.EvtKindDeleteRecord:
 			// Emit the delete
 			e := Event{
-				Did:    evt.Repo,
-				Seq:    evt.Seq,
-				Type:   EvtDeleteRecord,
-				Record: op.Path,
+				Did:       evt.Repo,
+				Seq:       evt.Seq,
+				Type:      EvtDeleteRecord,
+				DeleteRef: op.Path,
 			}
-			asJSON := &bytes.Buffer{}
-			err := json.NewEncoder(asJSON).Encode(e)
-			if err != nil {
-				log.Error("failed to encode json", "error", err)
-				break
-			}
-			err = c.Emit(ctx, asJSON.Bytes())
+
+			err = c.Emit(ctx, e)
 			if err != nil {
 				log.Error("failed to emit json", "error", err)
 				break
