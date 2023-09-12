@@ -9,7 +9,7 @@ build:
 
 # Run Jetstream
 .PHONY: run
-run:
+run: .env
 	@echo "Running Jetstream..."
 	$(GO_CMD) run cmd/jetstream/*.go
 

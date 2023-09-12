@@ -16,6 +16,7 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/ipfs/go-cid"
 	"github.com/labstack/gommon/log"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/exp/slog"
 
 	"github.com/bluesky-social/indigo/events"
@@ -29,6 +30,7 @@ import (
 type Consumer struct {
 	SocketURL string
 	Progress  *Progress
+	Redis     *redis.Client
 	Emit      func(context.Context, Event) error
 }
 
@@ -39,6 +41,8 @@ type Progress struct {
 	lk                 sync.RWMutex
 	path               string
 }
+
+var redisPrefix = "jets"
 
 func (p *Progress) Update(seq int64, processedAt time.Time) {
 	p.lk.Lock()
@@ -105,6 +109,7 @@ func NewConsumer(
 	ctx context.Context,
 	socketURL string,
 	progPath string,
+	rClient *redis.Client,
 	emit func(context.Context, Event) error,
 ) (*Consumer, error) {
 	c := Consumer{
@@ -113,7 +118,8 @@ func NewConsumer(
 			LastSeq: -1,
 			path:    progPath,
 		},
-		Emit: emit,
+		Emit:  emit,
+		Redis: rClient,
 	}
 
 	// Check to see if the cursor exists
@@ -293,15 +299,55 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 			case *bsky.FeedLike:
 				e.Like = rec
 				e.RecType = "like"
+				if c.Redis != nil {
+					// Track likes in redis
+					nsid := strings.Split(op.Path, "/")[0]
+					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
+					err = c.Redis.HSet(ctx, key, rkey, rec.Subject.Uri).Err()
+					if err != nil {
+						log.Error("failed to track record", "error", err)
+						break
+					}
+				}
 			case *bsky.FeedRepost:
 				e.Repost = rec
 				e.RecType = "repost"
+				if c.Redis != nil {
+					// Track reposts in redis
+					nsid := strings.Split(op.Path, "/")[0]
+					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
+					err = c.Redis.HSet(ctx, key, rkey, rec.Subject.Uri).Err()
+					if err != nil {
+						log.Error("failed to track record", "error", err)
+						break
+					}
+				}
 			case *bsky.GraphFollow:
 				e.Follow = rec
 				e.RecType = "follow"
+				if c.Redis != nil {
+					// Track follows in redis
+					nsid := strings.Split(op.Path, "/")[0]
+					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
+					err = c.Redis.HSet(ctx, key, rkey, rec.Subject).Err()
+					if err != nil {
+						log.Error("failed to track record", "error", err)
+						break
+					}
+				}
 			case *bsky.GraphBlock:
 				e.Block = rec
 				e.RecType = "block"
+				if c.Redis != nil {
+					// Track blocks in redis
+					nsid := strings.Split(op.Path, "/")[0]
+					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
+					err = c.Redis.HSet(ctx, key, rkey, rec.Subject).Err()
+					if err != nil {
+						log.Error("failed to track record", "error", err)
+						break
+					}
+				}
 			case *bsky.GraphList:
 				e.List = rec
 				e.RecType = "list"
@@ -379,12 +425,80 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				e.RecType = "post"
 			case "app.bsky.feed.like":
 				e.RecType = "like"
+				// Lookup in Redis to find the subject
+				if c.Redis != nil {
+					nsid := strings.Split(op.Path, "/")[0]
+					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
+					subject, err := c.Redis.HGet(ctx, key, rkey).Result()
+					if err != nil {
+						if errors.Is(err, redis.Nil) {
+							log.Warn("like not found in redis", "key", key)
+							break
+						}
+						log.Error("failed to lookup like in redis", "error", err)
+						break
+					}
+					e.Like = &bsky.FeedLike{
+						Subject: &comatproto.RepoStrongRef{Uri: subject},
+					}
+				}
 			case "app.bsky.feed.repost":
 				e.RecType = "repost"
+				// Lookup in Redis to find the subject
+				if c.Redis != nil {
+					nsid := strings.Split(op.Path, "/")[0]
+					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
+					subject, err := c.Redis.HGet(ctx, key, rkey).Result()
+					if err != nil {
+						if errors.Is(err, redis.Nil) {
+							log.Warn("repost not found in redis", "key", key)
+							break
+						}
+						log.Error("failed to lookup repost in redis", "error", err)
+						break
+					}
+					e.Repost = &bsky.FeedRepost{
+						Subject: &comatproto.RepoStrongRef{Uri: subject},
+					}
+				}
 			case "app.bsky.graph.follow":
 				e.RecType = "follow"
+				// Lookup in Redis to find the subject
+				if c.Redis != nil {
+					nsid := strings.Split(op.Path, "/")[0]
+					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
+					subject, err := c.Redis.HGet(ctx, key, rkey).Result()
+					if err != nil {
+						if errors.Is(err, redis.Nil) {
+							log.Warn("follow not found in redis", "key", key)
+							break
+						}
+						log.Error("failed to lookup follow in redis", "error", err)
+						break
+					}
+					e.Follow = &bsky.GraphFollow{
+						Subject: subject,
+					}
+				}
 			case "app.bsky.graph.block":
 				e.RecType = "block"
+				// Lookup in Redis to find the subject
+				if c.Redis != nil {
+					nsid := strings.Split(op.Path, "/")[0]
+					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
+					subject, err := c.Redis.HGet(ctx, key, rkey).Result()
+					if err != nil {
+						if errors.Is(err, redis.Nil) {
+							log.Warn("block not found in redis", "key", key)
+							break
+						}
+						log.Error("failed to lookup block in redis", "error", err)
+						break
+					}
+					e.Block = &bsky.GraphBlock{
+						Subject: subject,
+					}
+				}
 			case "app.bsky.graph.list":
 				e.RecType = "list"
 			case "app.bsky.graph.listitem":

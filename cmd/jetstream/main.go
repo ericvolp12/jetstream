@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/exp/slog"
 
@@ -62,6 +63,11 @@ func main() {
 			Usage:   "path to the cursor file",
 			Value:   "./cursor.json",
 			EnvVars: []string{"CURSOR_FILE"},
+		},
+		&cli.StringFlag{
+			Name:    "redis-url",
+			Usage:   "redis url for state storage",
+			EnvVars: []string{"REDIS_URL"},
 		},
 	}
 
@@ -113,10 +119,25 @@ func Jetstream(cctx *cli.Context) error {
 
 	s := NewServer()
 
+	var rClient *redis.Client
+
+	if cctx.String("redis-url") != "" {
+		rClient = redis.NewClient(&redis.Options{
+			Addr: cctx.String("redis-url"),
+		})
+
+		// Try to ping
+		err := rClient.Ping(ctx).Err()
+		if err != nil {
+			return fmt.Errorf("failed to ping redis: %w", err)
+		}
+	}
+
 	c, err := consumer.NewConsumer(
 		ctx,
 		u.String(),
 		cctx.String("cursor-file"),
+		rClient,
 		s.Emit,
 	)
 	if err != nil {
