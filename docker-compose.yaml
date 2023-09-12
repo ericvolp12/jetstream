@@ -9,7 +9,11 @@ services:
     restart: always
     image: jetstream
     container_name: jetstream
+    environment:
+      - CURSOR_FILE=/data/cursor.json
     env_file:
       - .env
     ports:
       - "6008:8080"
+    volumes:
+      - .:/data

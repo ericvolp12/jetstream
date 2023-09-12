@@ -17,3 +17,8 @@ run:
 up:
 	@echo "Starting Jetstream..."
 	docker-compose up -d --build
+
+.PHONY: down
+down:
+	@echo "Stopping Jetstream..."
+	docker-compose down
