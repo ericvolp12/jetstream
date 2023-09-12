@@ -438,6 +438,12 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 						log.Error("failed to lookup like in redis", "error", err)
 						break
 					}
+					// Delete the record from redis
+					err = c.Redis.HDel(ctx, key, rkey).Err()
+					if err != nil {
+						log.Error("failed to delete record from redis", "error", err)
+					}
+
 					e.Like = &bsky.FeedLike{
 						Subject: &comatproto.RepoStrongRef{Uri: subject},
 					}
@@ -456,6 +462,11 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 						}
 						log.Error("failed to lookup repost in redis", "error", err)
 						break
+					}
+					// Delete the record from redis
+					err = c.Redis.HDel(ctx, key, rkey).Err()
+					if err != nil {
+						log.Error("failed to delete record from redis", "error", err)
 					}
 					e.Repost = &bsky.FeedRepost{
 						Subject: &comatproto.RepoStrongRef{Uri: subject},
@@ -476,6 +487,11 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 						log.Error("failed to lookup follow in redis", "error", err)
 						break
 					}
+					// Delete the record from redis
+					err = c.Redis.HDel(ctx, key, rkey).Err()
+					if err != nil {
+						log.Error("failed to delete record from redis", "error", err)
+					}
 					e.Follow = &bsky.GraphFollow{
 						Subject: subject,
 					}
@@ -494,6 +510,11 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 						}
 						log.Error("failed to lookup block in redis", "error", err)
 						break
+					}
+					// Delete the record from redis
+					err = c.Redis.HDel(ctx, key, rkey).Err()
+					if err != nil {
+						log.Error("failed to delete record from redis", "error", err)
 					}
 					e.Block = &bsky.GraphBlock{
 						Subject: subject,
