@@ -14,6 +14,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/exp/slices"
 	"golang.org/x/exp/slog"
 )
 
@@ -30,6 +31,7 @@ type Subscriber struct {
 	compress         bool
 	deliveredCounter prometheus.Counter
 	bytesCounter     prometheus.Counter
+	wantedTypes      []string
 }
 
 type Server struct {
@@ -113,6 +115,12 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
+		if len(sub.wantedTypes) > 0 {
+			if !slices.Contains(sub.wantedTypes, e.RecType) {
+				continue
+			}
+		}
+
 		msg := jsonData
 		switch sub.format {
 		case "json":
@@ -145,7 +153,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	return nil
 }
 
-func (s *Server) AddSubscriber(ws *websocket.Conn, format string, compress bool) *Subscriber {
+func (s *Server) AddSubscriber(ws *websocket.Conn, format string, compress bool, wantedTypes []string) *Subscriber {
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
@@ -155,6 +163,7 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, format string, compress bool)
 		id:               s.nextSub,
 		format:           format,
 		compress:         compress,
+		wantedTypes:      wantedTypes,
 		deliveredCounter: eventsDelivered.WithLabelValues(format, ws.RemoteAddr().String()),
 		bytesCounter:     bytesDelivered.WithLabelValues(format, ws.RemoteAddr().String()),
 	}
@@ -181,6 +190,7 @@ func (s *Server) RemoveSubscriber(num int64) {
 }
 
 var validFormats = []string{"json", "cbor"}
+var validRecordTypes = []string{"post", "like", "repost", "follow", "block", "list", "listItem", "feedGenerator", "handle", "profile"}
 
 func (s *Server) HandleSubscribe(c echo.Context) error {
 	ctx, cancel := context.WithCancel(c.Request().Context())
@@ -205,6 +215,19 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 
 	compress := c.QueryParam("compress") == "true"
 
+	wantedTypes := []string{}
+	qWantedTypes := c.Request().URL.Query()["wantedTypes"]
+	if len(qWantedTypes) > 0 {
+		for _, t := range qWantedTypes {
+			for _, v := range validRecordTypes {
+				if t == v {
+					wantedTypes = append(wantedTypes, t)
+					break
+				}
+			}
+		}
+	}
+
 	log := slog.With("source", "server_handle_subscribe", "remote_addr", ws.RemoteAddr().String())
 
 	go func() {
@@ -218,7 +241,7 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		}
 	}()
 
-	sub := s.AddSubscriber(ws, format, compress)
+	sub := s.AddSubscriber(ws, format, compress, wantedTypes)
 	defer s.RemoveSubscriber(sub.id)
 
 	for {

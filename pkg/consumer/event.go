@@ -3,9 +3,11 @@ package consumer
 import "github.com/bluesky-social/indigo/api/bsky"
 
 type Event struct {
-	Did  string `json:"did"`
-	Seq  int64  `json:"seq"`
-	Type string `json:"type"`
+	Did    string `json:"did"`
+	Seq    int64  `json:"seq"`
+	OpType string `json:"opType"`
+
+	RecType string `json:"recType,omitempty"`
 
 	DeleteRef string `json:"deleteRef,omitempty"`
 

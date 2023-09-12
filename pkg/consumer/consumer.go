@@ -152,7 +152,7 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 		e := Event{
 			Did:    xe.RepoHandle.Did,
 			Seq:    xe.RepoHandle.Seq,
-			Type:   EvtUpdateRecord,
+			OpType: EvtUpdateRecord,
 			Handle: xe.RepoHandle.Handle,
 		}
 		err = c.Emit(ctx, e)
@@ -263,13 +263,14 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 			}
 			// Emit the create
 			e := Event{
-				Did:  evt.Repo,
-				Seq:  evt.Seq,
-				Type: EvtCreateRecord,
+				Did:    evt.Repo,
+				Seq:    evt.Seq,
+				OpType: EvtCreateRecord,
 			}
 			switch rec := rec.(type) {
 			case *bsky.ActorProfile:
 				e.Profile = rec
+				e.RecType = "profile"
 			case *bsky.FeedPost:
 				// Filter out empty embeds which get upset when marshalled to json
 				if rec.Embed != nil &&
@@ -288,20 +289,28 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 					rec.Facets = facets
 				}
 				e.Post = rec
+				e.RecType = "post"
 			case *bsky.FeedLike:
 				e.Like = rec
+				e.RecType = "like"
 			case *bsky.FeedRepost:
 				e.Repost = rec
+				e.RecType = "repost"
 			case *bsky.GraphFollow:
 				e.Follow = rec
+				e.RecType = "follow"
 			case *bsky.GraphBlock:
 				e.Block = rec
+				e.RecType = "block"
 			case *bsky.GraphList:
 				e.List = rec
+				e.RecType = "list"
 			case *bsky.GraphListitem:
 				e.ListItem = rec
+				e.RecType = "listItem"
 			case *bsky.FeedGenerator:
 				e.FeedGenerator = rec
+				e.RecType = "feedGenerator"
 			default:
 				log.Warn("unknown record type", "op", op.Path)
 				break
@@ -341,7 +350,8 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				e := Event{
 					Did:     evt.Repo,
 					Seq:     evt.Seq,
-					Type:    EvtUpdateRecord,
+					OpType:  EvtUpdateRecord,
+					RecType: "profile",
 					Profile: rec,
 				}
 
@@ -357,8 +367,33 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 			e := Event{
 				Did:       evt.Repo,
 				Seq:       evt.Seq,
-				Type:      EvtDeleteRecord,
+				OpType:    EvtDeleteRecord,
 				DeleteRef: op.Path,
+			}
+
+			nsid := strings.Split(op.Path, "/")[0]
+			switch nsid {
+			case "app.bsky.feed.profile":
+				e.RecType = "profile"
+			case "app.bsky.feed.post":
+				e.RecType = "post"
+			case "app.bsky.feed.like":
+				e.RecType = "like"
+			case "app.bsky.feed.repost":
+				e.RecType = "repost"
+			case "app.bsky.graph.follow":
+				e.RecType = "follow"
+			case "app.bsky.graph.block":
+				e.RecType = "block"
+			case "app.bsky.graph.list":
+				e.RecType = "list"
+			case "app.bsky.graph.listitem":
+				e.RecType = "listItem"
+			case "app.bsky.feed.generator":
+				e.RecType = "feedGenerator"
+			default:
+				log.Warn("unknown record type", "op", op.Path)
+				break
 			}
 
 			err = c.Emit(ctx, e)
