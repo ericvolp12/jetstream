@@ -24,3 +24,4 @@
 go.work
 
 cursor.json
+.env
