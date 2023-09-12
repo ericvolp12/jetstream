@@ -53,7 +53,7 @@ func main() {
 		},
 		&cli.IntFlag{
 			Name:    "port",
-			Usage:   "port to serve metrics on",
+			Usage:   "port to serve echo on",
 			Value:   8080,
 			EnvVars: []string{"PORT"},
 		},
@@ -187,30 +187,30 @@ func Jetstream(cctx *cli.Context) error {
 	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
 	e.GET("/subscribe", s.HandleSubscribe)
 
-	metricServer := &http.Server{
+	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cctx.Int("port")),
 		Handler: e,
 	}
 
-	// Startup metrics server
-	shutdownMetrics := make(chan struct{})
-	metricsShutdown := make(chan struct{})
+	// Startup echo server
+	shutdownEcho := make(chan struct{})
+	echoShutdown := make(chan struct{})
 	go func() {
-		logger := log.With("source", "metrics_server")
+		logger := log.With("source", "echo_server")
 
-		logger.Info("metrics server listening", "port", cctx.Int("port"))
+		logger.Info("echo server listening", "port", cctx.Int("port"))
 
 		go func() {
-			if err := metricServer.ListenAndServe(); err != http.ErrServerClosed {
-				logger.Error("failed to start metrics server", "error", err)
+			if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
+				logger.Error("failed to start echo server", "error", err)
 			}
 		}()
-		<-shutdownMetrics
-		if err := metricServer.Shutdown(ctx); err != nil {
-			logger.Error("failed to shutdown metrics server", "error", err)
+		<-shutdownEcho
+		if err := httpServer.Shutdown(ctx); err != nil {
+			logger.Error("failed to shutdown echo server", "error", err)
 		}
-		logger.Info("metrics server shut down")
-		close(metricsShutdown)
+		logger.Info("echo server shut down")
+		close(echoShutdown)
 	}()
 
 	if c.Progress.LastSeq >= 0 {
@@ -257,12 +257,12 @@ func Jetstream(cctx *cli.Context) error {
 	close(shutdownRepoStream)
 	close(shutdownLivenessChecker)
 	close(shutdownCursorManager)
-	close(shutdownMetrics)
+	close(shutdownEcho)
 
 	<-repoStreamShutdown
 	<-livenessCheckerShutdown
 	<-cursorManagerShutdown
-	<-metricsShutdown
+	<-echoShutdown
 	log.Info("shut down successfully")
 
 	return nil
