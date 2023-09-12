@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/klauspost/compress/zstd"
 	"github.com/labstack/echo/v4"
 	"golang.org/x/exp/slog"
 )
@@ -35,11 +36,11 @@ func NewServer() *Server {
 	}
 }
 
-// var encoder, _ = zstd.NewWriter(nil)
+var encoder, _ = zstd.NewWriter(nil)
 
-// func ZstdCompress(src []byte) []byte {
-// 	return encoder.EncodeAll(src, make([]byte, 0, len(src)))
-// }
+func ZstdCompress(src []byte) []byte {
+	return encoder.EncodeAll(src, make([]byte, 0, len(src)))
+}
 
 func (s *Server) Emit(ctx context.Context, data []byte) error {
 	ctx, span := tracer.Start(ctx, "Emit")
@@ -50,19 +51,30 @@ func (s *Server) Emit(ctx context.Context, data []byte) error {
 	s.lk.RLock()
 	defer s.lk.RUnlock()
 
+	zstdData := []byte{}
+
+	// Check if any subscribers want zstd
+	for _, sub := range s.Subscribers {
+		if sub.format == "zstd" {
+			zstdData = ZstdCompress(data)
+			break
+		}
+	}
+
 	for _, sub := range s.Subscribers {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
-		// if sub.format == "zstd" {
-		// 	data = ZstdCompress(data)
-		// }
+		msg := data
+		if sub.format == "zstd" {
+			msg = zstdData
+		}
 
 		select {
 		case <-ctx.Done():
 			log.Error("failed to send event to subscriber", "error", ctx.Err(), "subscriber", sub.id)
 			return ctx.Err()
-		case sub.buf <- data:
+		case sub.buf <- msg:
 			sub.seq++
 		}
 	}
