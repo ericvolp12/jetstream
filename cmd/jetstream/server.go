@@ -56,34 +56,58 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 
 	log := slog.With("source", "server_emit")
 
-	asJSON := &bytes.Buffer{}
-	err := json.NewEncoder(asJSON).Encode(e)
-	if err != nil {
-		return fmt.Errorf("failed to encode event as json: %w", err)
-	}
-	jsonData := asJSON.Bytes()
-
-	cborData, err := cbor.Marshal(e)
-	if err != nil {
-		return fmt.Errorf("failed to encode event as cbor: %w", err)
-	}
-
 	s.lk.RLock()
 	defer s.lk.RUnlock()
 
 	eventsEmitted.Inc()
-	bytesEmitted.Add(float64(len(jsonData)))
 
-	compressedJSON := []byte{}
-	compressedCBOR := []byte{}
+	var jsonData *[]byte
+	var cborData *[]byte
+	var compressedJSON *[]byte
+	var compressedCBOR *[]byte
+
+	biggestBufSize := 0
+
 	// Check if any subscribers want zstd
 	for _, sub := range s.Subscribers {
-		if sub.compress && sub.format == "json" && len(compressedJSON) == 0 {
-			compressedJSON = ZstdCompress(jsonData)
-		} else if sub.compress && sub.format == "cbor" {
-			compressedCBOR = ZstdCompress(cborData)
+		if sub.format == "json" {
+			if jsonData == nil {
+				asJSON := &bytes.Buffer{}
+				err := json.NewEncoder(asJSON).Encode(e)
+				if err != nil {
+					return fmt.Errorf("failed to encode event as json: %w", err)
+				}
+				b := asJSON.Bytes()
+				if len(b) > biggestBufSize {
+					biggestBufSize = len(b)
+				}
+				jsonData = &b
+			}
+			if sub.compress && compressedJSON == nil {
+				b := ZstdCompress(*jsonData)
+				compressedJSON = &b
+			}
+		}
+		if sub.format == "cbor" {
+			if cborData == nil {
+				asCbor, err := cbor.Marshal(e)
+				if err != nil {
+					return fmt.Errorf("failed to encode event as cbor: %w", err)
+				}
+				b := asCbor
+				if len(b) > biggestBufSize {
+					biggestBufSize = len(b)
+				}
+				cborData = &b
+			}
+			if sub.compress && compressedCBOR == nil {
+				b := ZstdCompress(*cborData)
+				compressedCBOR = &b
+			}
 		}
 	}
+
+	bytesEmitted.Add(float64(biggestBufSize))
 
 	for _, sub := range s.Subscribers {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -113,10 +137,10 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 				log.Error("failed to close subscriber connection", "error", err)
 			}
 			return nil
-		case sub.buf <- msg:
+		case sub.buf <- *msg:
 			sub.seq++
 			sub.deliveredCounter.Inc()
-			sub.bytesCounter.Add(float64(len(msg)))
+			sub.bytesCounter.Add(float64(len(*msg)))
 		}
 	}
 	return nil
