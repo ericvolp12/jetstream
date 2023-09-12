@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ericvolp12/jetstream/pkg/consumer"
+	"github.com/fxamacker/cbor/v2"
 	"github.com/gorilla/websocket"
 	"github.com/klauspost/compress/zstd"
 	"github.com/labstack/echo/v4"
@@ -26,6 +27,7 @@ type Subscriber struct {
 	buf              chan []byte
 	id               int64
 	format           string
+	compress         bool
 	deliveredCounter prometheus.Counter
 	bytesCounter     prometheus.Counter
 }
@@ -59,22 +61,27 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	if err != nil {
 		return fmt.Errorf("failed to encode event as json: %w", err)
 	}
+	jsonData := asJSON.Bytes()
 
-	data := asJSON.Bytes()
+	cborData, err := cbor.Marshal(e)
+	if err != nil {
+		return fmt.Errorf("failed to encode event as cbor: %w", err)
+	}
 
 	s.lk.RLock()
 	defer s.lk.RUnlock()
 
 	eventsEmitted.Inc()
-	bytesEmitted.Add(float64(len(data)))
+	bytesEmitted.Add(float64(len(jsonData)))
 
-	zstdData := []byte{}
-
+	compressedJSON := []byte{}
+	compressedCBOR := []byte{}
 	// Check if any subscribers want zstd
 	for _, sub := range s.Subscribers {
-		if sub.format == "zstd" {
-			zstdData = ZstdCompress(data)
-			break
+		if sub.compress && sub.format == "json" && len(compressedJSON) == 0 {
+			compressedJSON = ZstdCompress(jsonData)
+		} else if sub.compress && sub.format == "cbor" {
+			compressedCBOR = ZstdCompress(cborData)
 		}
 	}
 
@@ -82,9 +89,18 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
-		msg := data
-		if sub.format == "zstd" {
-			msg = zstdData
+		msg := jsonData
+		switch sub.format {
+		case "json":
+			if sub.compress {
+				msg = compressedJSON
+			}
+		case "cbor":
+			if sub.compress {
+				msg = compressedCBOR
+			} else {
+				msg = cborData
+			}
 		}
 
 		select {
@@ -106,7 +122,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	return nil
 }
 
-func (s *Server) AddSubscriber(ws *websocket.Conn, format string) *Subscriber {
+func (s *Server) AddSubscriber(ws *websocket.Conn, format string, compress bool) *Subscriber {
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
@@ -115,6 +131,7 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, format string) *Subscriber {
 		buf:              make(chan []byte, 100),
 		id:               s.nextSub,
 		format:           format,
+		compress:         compress,
 		deliveredCounter: eventsDelivered.WithLabelValues(format, ws.RemoteAddr().String()),
 		bytesCounter:     bytesDelivered.WithLabelValues(format, ws.RemoteAddr().String()),
 	}
@@ -140,7 +157,7 @@ func (s *Server) RemoveSubscriber(num int64) {
 	delete(s.Subscribers, num)
 }
 
-var validFormats = []string{"raw", "gzip", "zstd"}
+var validFormats = []string{"json", "cbor"}
 
 func (s *Server) HandleSubscribe(c echo.Context) error {
 	ctx, cancel := context.WithCancel(c.Request().Context())
@@ -152,10 +169,18 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 	}
 	defer ws.Close()
 
-	format := c.QueryParam("format")
-	if format == "" {
-		format = "raw"
+	format := "json"
+	qFormat := c.QueryParam("format")
+	if qFormat != "" {
+		for _, f := range validFormats {
+			if f == qFormat {
+				format = f
+				break
+			}
+		}
 	}
+
+	compress := c.QueryParam("compress") == "true"
 
 	log := slog.With("source", "server_handle_subscribe", "remote_addr", ws.RemoteAddr().String())
 
@@ -170,7 +195,7 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		}
 	}()
 
-	sub := s.AddSubscriber(ws, format)
+	sub := s.AddSubscriber(ws, format, compress)
 	defer s.RemoveSubscriber(sub.id)
 
 	for {
