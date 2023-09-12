@@ -38,5 +38,5 @@ The following Query Parameters are supported:
 
 A maximal example using all flags looks like:
 ```
-"ws://localhost:8080/subscribe?format=cbor&compress=true&wantedTypes=post&wantedTypes=like&wantedTypes=follow
+ws://localhost:8080/subscribe?format=cbor&compress=true&wantedTypes=post&wantedTypes=like&wantedTypes=follow
 ```
