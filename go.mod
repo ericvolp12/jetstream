@@ -1,4 +1,4 @@
-module github.com/ericvolp12/skypipe
+module github.com/ericvolp12/jetstream
 
 go 1.20
 

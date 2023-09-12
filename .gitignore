@@ -23,5 +23,5 @@
 # Go workspace file
 go.work
 
-skypipe
+jetstream
 cursor.json
