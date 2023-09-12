@@ -36,7 +36,7 @@ The following Query Parameters are supported:
   - `handle`
   - `profile`
 
-A maximal example using all flags looks like:
+A maximal example using all parameters looks like:
 ```
 ws://localhost:8080/subscribe?format=cbor&compress=true&wantedTypes=post&wantedTypes=like&wantedTypes=follow
 ```
