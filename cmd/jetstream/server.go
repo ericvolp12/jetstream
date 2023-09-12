@@ -120,10 +120,9 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 				msg = compressedJSON
 			}
 		case "cbor":
+			msg = cborData
 			if sub.compress {
 				msg = compressedCBOR
-			} else {
-				msg = cborData
 			}
 		}
 
