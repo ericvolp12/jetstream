@@ -30,7 +30,7 @@ func main() {
 	app := cli.App{
 		Name:    "jetstream",
 		Usage:   "atproto firehose translation service",
-		Version: "0.0.1",
+		Version: "0.0.2",
 	}
 
 	app.Flags = []cli.Flag{
@@ -167,6 +167,33 @@ func Jetstream(cctx *cli.Context) error {
 		}
 	}()
 
+	// Start a goroutine to garbage collect Badger every 5 minutes
+	shutdownBadgerGC := make(chan struct{})
+	badgerGCShutdown := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		log := log.With("source", "badger_gc")
+
+		for {
+			select {
+			case <-shutdownBadgerGC:
+				log.Info("shutting down badger gc")
+				err := db.RunValueLogGC(0.5)
+				if err != nil {
+					log.Error("failed to run badger gc", "error", err)
+				}
+				log.Info("badger gc shut down successfully")
+				close(badgerGCShutdown)
+				return
+			case <-ticker.C:
+				err := db.RunValueLogGC(0.5)
+				if err != nil {
+					log.Error("failed to run badger gc", "error", err)
+				}
+			}
+		}
+	}()
+
 	// Start a goroutine to manage the liveness checker, shutting down if no events are received for 15 seconds
 	shutdownLivenessChecker := make(chan struct{})
 	livenessCheckerShutdown := make(chan struct{})
@@ -183,7 +210,7 @@ func Jetstream(cctx *cli.Context) error {
 				return
 			case <-ticker.C:
 				seq, _ := c.Progress.Get()
-				if seq == lastSeq {
+				if seq == lastSeq && seq != 0 {
 					log.Error("no new events in last 15 seconds, shutting down for docker to restart me", "seq", seq)
 					close(kill)
 				} else {
@@ -272,11 +299,13 @@ func Jetstream(cctx *cli.Context) error {
 	close(shutdownLivenessChecker)
 	close(shutdownCursorManager)
 	close(shutdownEcho)
+	close(shutdownBadgerGC)
 
 	<-repoStreamShutdown
 	<-livenessCheckerShutdown
 	<-cursorManagerShutdown
 	<-echoShutdown
+	<-badgerGCShutdown
 	log.Info("shut down successfully")
 
 	return nil

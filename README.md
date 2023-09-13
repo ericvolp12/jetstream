@@ -2,6 +2,9 @@
 
 Jetstream is a Bluesky-specific streaming service that consumes an ATProto `com.atproto.sync.subscribeRepos` stream and converts it into a series of `app.bsky` namespaced objects.
 
+Jetstream uses BadgerDB to keep track of subjects of likes, reposts, follows, and blocks so that when they are deleted, it can enrich a stream event with the subject being "unliked", "unreposted", "unfollowed" or "unblocked".
+- This is done as a "best-effort", Jetstream only knows about the subjects of events it has witnessed, so there will be like deletions and such that don't contain a subject.
+
 ## Running Jetstream
 
 To run Jetstream, make sure you have docker and docker compose installed and run `make up` in the repo root.
