@@ -11,25 +11,8 @@ services:
     container_name: jetstream
     environment:
       - CURSOR_FILE=/data/cursor.json
-      - REDIS_URL=redis:6379
+      - DB_FILE=/data/jetstream.db
     ports:
       - "6008:8080"
     volumes:
-      - .:/data
-  redis:
-    image: 'redis/redis-stack:latest'
-    ulimits:
-      memlock: -1
-    ports:
-      - '6342:6379'
-    restart: always
-    volumes:
-      - ./redis_data:/data
-      - ./redis.conf:/redis-stack.conf
-  exporter:
-    image: quay.io/oliver006/redis_exporter
-    ports:
-      - 9112:9121
-    restart: always
-    environment:
-      - REDIS_ADDR=redis:6379
+      - ./data:/data

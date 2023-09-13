@@ -1,6 +1,9 @@
 package consumer
 
-import "github.com/bluesky-social/indigo/api/bsky"
+import (
+	"github.com/bluesky-social/indigo/api/bsky"
+	"gorm.io/gorm"
+)
 
 type Event struct {
 	Did    string `json:"did"`
@@ -30,3 +33,9 @@ var (
 	EvtUpdateRecord = "u"
 	EvtDeleteRecord = "d"
 )
+
+type Subject struct {
+	gorm.Model
+	Path    string `gorm:"primaryKey"`
+	Subject string
+}

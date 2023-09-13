@@ -23,6 +23,6 @@
 # Go workspace file
 go.work
 
-cursor.json
+
 .env
-redis_data/
+data/

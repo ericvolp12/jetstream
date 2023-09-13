@@ -19,9 +19,11 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/exp/slog"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"github.com/urfave/cli/v2"
 )
@@ -65,9 +67,10 @@ func main() {
 			EnvVars: []string{"CURSOR_FILE"},
 		},
 		&cli.StringFlag{
-			Name:    "redis-url",
-			Usage:   "redis url for state storage",
-			EnvVars: []string{"REDIS_URL"},
+			Name:    "db-file",
+			Usage:   "path to the sqlite db file",
+			Value:   "jetstream.db",
+			EnvVars: []string{"DB_FILE"},
 		},
 	}
 
@@ -119,25 +122,19 @@ func Jetstream(cctx *cli.Context) error {
 
 	s := NewServer()
 
-	var rClient *redis.Client
-
-	if cctx.String("redis-url") != "" {
-		rClient = redis.NewClient(&redis.Options{
-			Addr: cctx.String("redis-url"),
-		})
-
-		// Try to ping
-		err := rClient.Ping(ctx).Err()
-		if err != nil {
-			return fmt.Errorf("failed to ping redis: %w", err)
-		}
+	db, err := setupDB(ctx, cctx.String("db-file"))
+	if err != nil {
+		return fmt.Errorf("failed to setup db: %w", err)
 	}
+
+	// Migrate the schema for Subject Tracking
+	db.AutoMigrate(&consumer.Subject{})
 
 	c, err := consumer.NewConsumer(
 		ctx,
 		u.String(),
 		cctx.String("cursor-file"),
-		rClient,
+		db,
 		s.Emit,
 	)
 	if err != nil {
@@ -287,4 +284,42 @@ func Jetstream(cctx *cli.Context) error {
 	log.Info("shut down successfully")
 
 	return nil
+}
+
+func setupDB(ctx context.Context, dbFile string) (*gorm.DB, error) {
+	// Open the database connection
+	db, err := gorm.Open(sqlite.Open(dbFile), &gorm.Config{
+		SkipDefaultTransaction: true,
+		PrepareStmt:            true,
+		Logger:                 logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to open db: %w", err)
+	}
+
+	sqldb, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sqldb: %w", err)
+	}
+
+	sqldb.SetMaxIdleConns(20)
+	sqldb.SetMaxOpenConns(10)
+	sqldb.SetConnMaxIdleTime(time.Hour)
+
+	err = db.Exec("PRAGMA journal_mode=WAL;").Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to set journal mode: %w", err)
+	}
+
+	err = db.Exec("PRAGMA synchronous=NORMAL;").Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to set synchronous mode: %w", err)
+	}
+
+	err = db.Exec("PRAGMA temp_store = memory;").Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to set temp_store: %w", err)
+	}
+
+	return db, nil
 }

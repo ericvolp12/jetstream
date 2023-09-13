@@ -5,13 +5,13 @@ GO_CMD = CGO_ENABLED=0 GOOS=linux go
 .PHONY: build
 build:
 	@echo "Building Jetstream Go binary..."
-	$(GO_CMD) build -o jetstream cmd/jetstream/*.go
+	$(GO_CMD_W_CGO) build -o jetstream cmd/jetstream/*.go
 
 # Run Jetstream
 .PHONY: run
 run: .env
 	@echo "Running Jetstream..."
-	$(GO_CMD) run cmd/jetstream/*.go
+	$(GO_CMD_W_CGO) run cmd/jetstream/*.go
 
 .PHONY: up
 up:

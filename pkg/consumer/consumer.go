@@ -16,8 +16,8 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/ipfs/go-cid"
 	"github.com/labstack/gommon/log"
-	"github.com/redis/go-redis/v9"
 	"golang.org/x/exp/slog"
+	"gorm.io/gorm"
 
 	"github.com/bluesky-social/indigo/events"
 	"github.com/bluesky-social/indigo/repo"
@@ -30,7 +30,7 @@ import (
 type Consumer struct {
 	SocketURL string
 	Progress  *Progress
-	Redis     *redis.Client
+	DB        *gorm.DB
 	Emit      func(context.Context, Event) error
 }
 
@@ -41,8 +41,6 @@ type Progress struct {
 	lk                 sync.RWMutex
 	path               string
 }
-
-var redisPrefix = "jets"
 
 func (p *Progress) Update(seq int64, processedAt time.Time) {
 	p.lk.Lock()
@@ -59,7 +57,7 @@ func (p *Progress) Get() (int64, time.Time) {
 
 var tracer = otel.Tracer("consumer")
 
-// WriteCursor writes the cursor to redis
+// WriteCursor writes the cursor to file
 func (c *Consumer) WriteCursor(ctx context.Context) error {
 	ctx, span := tracer.Start(ctx, "WriteCursor")
 	defer span.End()
@@ -84,7 +82,7 @@ func (c *Consumer) WriteCursor(ctx context.Context) error {
 	return nil
 }
 
-// ReadCursor reads the cursor from redis
+// ReadCursor reads the cursor from file
 func (c *Consumer) ReadCursor(ctx context.Context) error {
 	ctx, span := tracer.Start(ctx, "ReadCursor")
 	defer span.End()
@@ -109,7 +107,7 @@ func NewConsumer(
 	ctx context.Context,
 	socketURL string,
 	progPath string,
-	rClient *redis.Client,
+	db *gorm.DB,
 	emit func(context.Context, Event) error,
 ) (*Consumer, error) {
 	c := Consumer{
@@ -118,8 +116,8 @@ func NewConsumer(
 			LastSeq: -1,
 			path:    progPath,
 		},
-		Emit:  emit,
-		Redis: rClient,
+		Emit: emit,
+		DB:   db,
 	}
 
 	// Check to see if the cursor exists
@@ -299,54 +297,62 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 			case *bsky.FeedLike:
 				e.Like = rec
 				e.RecType = "like"
-				if c.Redis != nil {
-					// Track likes in redis
-					nsid := strings.Split(op.Path, "/")[0]
-					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
-					err = c.Redis.HSet(ctx, key, rkey, rec.Subject.Uri).Err()
-					if err != nil {
-						log.Error("failed to track record", "error", err)
-						break
-					}
+				// Track likes in sqlite
+				nsid := strings.Split(op.Path, "/")[0]
+				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
+				subj := Subject{
+					Path:    key,
+					Subject: rec.Subject.Uri,
+				}
+				err = c.DB.Create(&subj).Error
+				if err != nil {
+					log.Error("failed to track record", "error", err)
+					break
 				}
 			case *bsky.FeedRepost:
 				e.Repost = rec
 				e.RecType = "repost"
-				if c.Redis != nil {
-					// Track reposts in redis
-					nsid := strings.Split(op.Path, "/")[0]
-					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
-					err = c.Redis.HSet(ctx, key, rkey, rec.Subject.Uri).Err()
-					if err != nil {
-						log.Error("failed to track record", "error", err)
-						break
-					}
+				// Track reposts in sqlite
+				nsid := strings.Split(op.Path, "/")[0]
+				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
+				subj := Subject{
+					Path:    key,
+					Subject: rec.Subject.Uri,
+				}
+				err = c.DB.Create(&subj).Error
+				if err != nil {
+					log.Error("failed to track record", "error", err)
+					break
 				}
 			case *bsky.GraphFollow:
 				e.Follow = rec
 				e.RecType = "follow"
-				if c.Redis != nil {
-					// Track follows in redis
-					nsid := strings.Split(op.Path, "/")[0]
-					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
-					err = c.Redis.HSet(ctx, key, rkey, rec.Subject).Err()
-					if err != nil {
-						log.Error("failed to track record", "error", err)
-						break
-					}
+				// Track follows in sqlite
+				nsid := strings.Split(op.Path, "/")[0]
+				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
+				subj := Subject{
+					Path:    key,
+					Subject: rec.Subject,
+				}
+				err = c.DB.Create(&subj).Error
+				if err != nil {
+					log.Error("failed to track record", "error", err)
+					break
 				}
 			case *bsky.GraphBlock:
 				e.Block = rec
 				e.RecType = "block"
-				if c.Redis != nil {
-					// Track blocks in redis
-					nsid := strings.Split(op.Path, "/")[0]
-					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
-					err = c.Redis.HSet(ctx, key, rkey, rec.Subject).Err()
-					if err != nil {
-						log.Error("failed to track record", "error", err)
-						break
-					}
+				// Track blocks in sqlite
+				nsid := strings.Split(op.Path, "/")[0]
+				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
+				subj := Subject{
+					Path:    key,
+					Subject: rec.Subject,
+				}
+				err = c.DB.Create(&subj).Error
+				if err != nil {
+					log.Error("failed to track record", "error", err)
+					break
 				}
 			case *bsky.GraphList:
 				e.List = rec
@@ -425,100 +431,96 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				e.RecType = "post"
 			case "app.bsky.feed.like":
 				e.RecType = "like"
-				// Lookup in Redis to find the subject
-				if c.Redis != nil {
-					nsid := strings.Split(op.Path, "/")[0]
-					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
-					subject, err := c.Redis.HGet(ctx, key, rkey).Result()
-					if err != nil {
-						if errors.Is(err, redis.Nil) {
-							log.Warn("like not found in redis", "key", key)
-							break
-						}
-						log.Error("failed to lookup like in redis", "error", err)
+				// Lookup in Sqlite to find the subject
+				nsid := strings.Split(op.Path, "/")[0]
+				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
+				subj := Subject{}
+				err = c.DB.Where("path = ?", key).First(&subj).Error
+				if err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						log.Warn("like not found in sqlite", "key", key)
 						break
 					}
-					// Delete the record from redis
-					err = c.Redis.HDel(ctx, key, rkey).Err()
-					if err != nil {
-						log.Error("failed to delete record from redis", "error", err)
-					}
-
-					e.Like = &bsky.FeedLike{
-						Subject: &comatproto.RepoStrongRef{Uri: subject},
-					}
+					log.Error("failed to lookup like in sqlite", "error", err)
+					break
+				}
+				e.Like = &bsky.FeedLike{
+					Subject: &comatproto.RepoStrongRef{Uri: subj.Subject},
+				}
+				// Delete from sqlite
+				err = c.DB.Where("path = ?", key).Delete(&subj).Error
+				if err != nil {
+					log.Error("failed to delete like from sqlite", "error", err)
+					break
 				}
 			case "app.bsky.feed.repost":
 				e.RecType = "repost"
-				// Lookup in Redis to find the subject
-				if c.Redis != nil {
-					nsid := strings.Split(op.Path, "/")[0]
-					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
-					subject, err := c.Redis.HGet(ctx, key, rkey).Result()
-					if err != nil {
-						if errors.Is(err, redis.Nil) {
-							log.Warn("repost not found in redis", "key", key)
-							break
-						}
-						log.Error("failed to lookup repost in redis", "error", err)
+				// Lookup in sqlite to find the subject
+				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
+				subj := Subject{}
+				err = c.DB.Where("path = ?", key).First(&subj).Error
+				if err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						log.Warn("repost not found in sqlite", "key", key)
 						break
 					}
-					// Delete the record from redis
-					err = c.Redis.HDel(ctx, key, rkey).Err()
-					if err != nil {
-						log.Error("failed to delete record from redis", "error", err)
-					}
-					e.Repost = &bsky.FeedRepost{
-						Subject: &comatproto.RepoStrongRef{Uri: subject},
-					}
+					log.Error("failed to lookup repost in sqlite", "error", err)
+					break
+				}
+				e.Repost = &bsky.FeedRepost{
+					Subject: &comatproto.RepoStrongRef{Uri: subj.Subject},
+				}
+				// Delete from sqlite
+				err = c.DB.Where("path = ?", key).Delete(&subj).Error
+				if err != nil {
+					log.Error("failed to delete repost from sqlite", "error", err)
+					break
 				}
 			case "app.bsky.graph.follow":
 				e.RecType = "follow"
-				// Lookup in Redis to find the subject
-				if c.Redis != nil {
-					nsid := strings.Split(op.Path, "/")[0]
-					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
-					subject, err := c.Redis.HGet(ctx, key, rkey).Result()
-					if err != nil {
-						if errors.Is(err, redis.Nil) {
-							log.Warn("follow not found in redis", "key", key)
-							break
-						}
-						log.Error("failed to lookup follow in redis", "error", err)
+				// Lookup in sqlite to find the subject
+				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
+				subj := Subject{}
+				err = c.DB.Where("path = ?", key).First(&subj).Error
+				if err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						log.Warn("follow not found in sqlite", "key", key)
 						break
 					}
-					// Delete the record from redis
-					err = c.Redis.HDel(ctx, key, rkey).Err()
-					if err != nil {
-						log.Error("failed to delete record from redis", "error", err)
-					}
-					e.Follow = &bsky.GraphFollow{
-						Subject: subject,
-					}
+					log.Error("failed to lookup follow in sqlite", "error", err)
+					break
+				}
+				e.Follow = &bsky.GraphFollow{
+					Subject: subj.Subject,
+				}
+				// Delete from sqlite
+				err = c.DB.Where("path = ?", key).Delete(&subj).Error
+				if err != nil {
+					log.Error("failed to delete follow from sqlite", "error", err)
+					break
 				}
 			case "app.bsky.graph.block":
 				e.RecType = "block"
-				// Lookup in Redis to find the subject
-				if c.Redis != nil {
-					nsid := strings.Split(op.Path, "/")[0]
-					key := fmt.Sprintf("%s_%s_%s", redisPrefix, evt.Repo, nsid)
-					subject, err := c.Redis.HGet(ctx, key, rkey).Result()
-					if err != nil {
-						if errors.Is(err, redis.Nil) {
-							log.Warn("block not found in redis", "key", key)
-							break
-						}
-						log.Error("failed to lookup block in redis", "error", err)
+				// Lookup in sqlite to find the subject
+				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
+				subj := Subject{}
+				err = c.DB.Where("path = ?", key).First(&subj).Error
+				if err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						log.Warn("block not found in sqlite", "key", key)
 						break
 					}
-					// Delete the record from redis
-					err = c.Redis.HDel(ctx, key, rkey).Err()
-					if err != nil {
-						log.Error("failed to delete record from redis", "error", err)
-					}
-					e.Block = &bsky.GraphBlock{
-						Subject: subject,
-					}
+					log.Error("failed to lookup block in sqlite", "error", err)
+					break
+				}
+				e.Block = &bsky.GraphBlock{
+					Subject: subj.Subject,
+				}
+				// Delete from sqlite
+				err = c.DB.Where("path = ?", key).Delete(&subj).Error
+				if err != nil {
+					log.Error("failed to delete block from sqlite", "error", err)
+					break
 				}
 			case "app.bsky.graph.list":
 				e.RecType = "list"
