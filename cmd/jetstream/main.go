@@ -14,6 +14,7 @@ import (
 
 	"github.com/bluesky-social/indigo/events"
 	"github.com/bluesky-social/indigo/events/schedulers/autoscaling"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/ericvolp12/bsky-experiments/pkg/tracing"
 	"github.com/ericvolp12/jetstream/pkg/consumer"
 	"github.com/gorilla/websocket"
@@ -21,9 +22,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/exp/slog"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 
 	"github.com/urfave/cli/v2"
 )
@@ -67,10 +65,10 @@ func main() {
 			EnvVars: []string{"CURSOR_FILE"},
 		},
 		&cli.StringFlag{
-			Name:    "db-file",
-			Usage:   "path to the sqlite db file",
-			Value:   "jetstream.db",
-			EnvVars: []string{"DB_FILE"},
+			Name:    "db-dir",
+			Usage:   "path to the badger db directory",
+			Value:   "data/badger",
+			EnvVars: []string{"DB_DIR"},
 		},
 	}
 
@@ -122,13 +120,11 @@ func Jetstream(cctx *cli.Context) error {
 
 	s := NewServer()
 
-	db, err := setupDB(ctx, cctx.String("db-file"))
+	db, err := badger.Open(badger.DefaultOptions(cctx.String("db-dir")))
 	if err != nil {
-		return fmt.Errorf("failed to setup db: %w", err)
+		return fmt.Errorf("failed to open badger db: %w", err)
 	}
-
-	// Migrate the schema for Subject Tracking
-	db.AutoMigrate(&consumer.Subject{})
+	defer db.Close()
 
 	c, err := consumer.NewConsumer(
 		ctx,
@@ -284,42 +280,4 @@ func Jetstream(cctx *cli.Context) error {
 	log.Info("shut down successfully")
 
 	return nil
-}
-
-func setupDB(ctx context.Context, dbFile string) (*gorm.DB, error) {
-	// Open the database connection
-	db, err := gorm.Open(sqlite.Open(dbFile), &gorm.Config{
-		SkipDefaultTransaction: true,
-		PrepareStmt:            true,
-		Logger:                 logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to open db: %w", err)
-	}
-
-	sqldb, err := db.DB()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get sqldb: %w", err)
-	}
-
-	sqldb.SetMaxIdleConns(20)
-	sqldb.SetMaxOpenConns(10)
-	sqldb.SetConnMaxIdleTime(time.Hour)
-
-	err = db.Exec("PRAGMA journal_mode=WAL;").Error
-	if err != nil {
-		return nil, fmt.Errorf("failed to set journal mode: %w", err)
-	}
-
-	err = db.Exec("PRAGMA synchronous=NORMAL;").Error
-	if err != nil {
-		return nil, fmt.Errorf("failed to set synchronous mode: %w", err)
-	}
-
-	err = db.Exec("PRAGMA temp_store = memory;").Error
-	if err != nil {
-		return nil, fmt.Errorf("failed to set temp_store: %w", err)
-	}
-
-	return db, nil
 }

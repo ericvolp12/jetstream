@@ -4,6 +4,7 @@ go 1.20
 
 require (
 	github.com/bluesky-social/indigo v0.0.0-20230911210303-cdc0baf87d2f
+	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/ericvolp12/bsky-experiments v0.0.0-20230910062707-83c906139ba7
 	github.com/fxamacker/cbor/v2 v2.5.0
 	github.com/goccy/go-json v0.10.2
@@ -16,8 +17,6 @@ require (
 	github.com/urfave/cli/v2 v2.25.7
 	go.opentelemetry.io/otel v1.17.0
 	golang.org/x/exp v0.0.0-20230321023759-10a507213a29
-	gorm.io/driver/sqlite v1.5.0
-	gorm.io/gorm v1.25.1
 )
 
 require (
@@ -25,10 +24,16 @@ require (
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
+	github.com/dgraph-io/ristretto v0.1.1 // indirect
+	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/golang/glog v1.1.0 // indirect
+	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
+	github.com/golang/snappy v0.0.3 // indirect
+	github.com/google/flatbuffers v1.12.1 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.15.2 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
@@ -72,6 +77,7 @@ require (
 	github.com/multiformats/go-multihash v0.2.1 // indirect
 	github.com/multiformats/go-varint v0.0.7 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/polydawn/refmt v0.89.1-0.20221221234430-40501e09de1f // indirect
 	github.com/prometheus/client_model v0.3.0 // indirect
 	github.com/prometheus/common v0.42.0 // indirect
@@ -83,6 +89,7 @@ require (
 	github.com/whyrusleeping/cbor-gen v0.0.0-20230818171029-f91ae536ca25 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
+	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/internal/retry v1.16.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.16.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.16.0 // indirect
@@ -104,5 +111,6 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230526161137-0005af68ea54 // indirect
 	google.golang.org/grpc v1.55.0 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect
+	gorm.io/gorm v1.25.1 // indirect
 	lukechampine.com/blake3 v1.1.7 // indirect
 )
