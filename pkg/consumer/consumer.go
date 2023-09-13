@@ -405,7 +405,6 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 			case *bsky.ActorProfile:
 				// Process profile updates
 				span.SetAttributes(attribute.String("record_type", "actor_profile"))
-				recordsProcessedCounter.WithLabelValues("actor_profile", c.SocketURL).Inc()
 				// Pack the record into an event
 				e := Event{
 					Did:     evt.Repo,
