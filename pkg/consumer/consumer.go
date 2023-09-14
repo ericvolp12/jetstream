@@ -136,10 +136,13 @@ func NewConsumer(
 func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamEvent) error {
 	ctx, span := tracer.Start(ctx, "HandleStreamEvent")
 	defer span.End()
-
 	switch {
 	case xe.RepoCommit != nil:
 		eventsProcessedCounter.WithLabelValues("repo_commit", c.SocketURL).Inc()
+		if xe.RepoCommit.TooBig {
+			log.Warn("repo commit too big", "repo", xe.RepoCommit.Repo, "seq", xe.RepoCommit.Seq, "rev", xe.RepoCommit.Rev)
+			return nil
+		}
 		return c.HandleRepoCommit(ctx, xe.RepoCommit)
 	case xe.RepoHandle != nil:
 		eventsProcessedCounter.WithLabelValues("repo_handle", c.SocketURL).Inc()

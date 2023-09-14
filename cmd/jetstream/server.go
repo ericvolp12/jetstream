@@ -32,6 +32,7 @@ type Subscriber struct {
 	deliveredCounter prometheus.Counter
 	bytesCounter     prometheus.Counter
 	wantedTypes      []string
+	wantedDids       []string
 }
 
 type Server struct {
@@ -121,6 +122,12 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 			}
 		}
 
+		if len(sub.wantedDids) > 0 {
+			if !slices.Contains(sub.wantedDids, e.Did) {
+				continue
+			}
+		}
+
 		msg := jsonData
 		switch sub.format {
 		case "json":
@@ -153,7 +160,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	return nil
 }
 
-func (s *Server) AddSubscriber(ws *websocket.Conn, format string, compress bool, wantedTypes []string) *Subscriber {
+func (s *Server) AddSubscriber(ws *websocket.Conn, format string, compress bool, wantedTypes []string, wantedDids []string) *Subscriber {
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
@@ -164,6 +171,7 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, format string, compress bool,
 		format:           format,
 		compress:         compress,
 		wantedTypes:      wantedTypes,
+		wantedDids:       wantedDids,
 		deliveredCounter: eventsDelivered.WithLabelValues(format, ws.RemoteAddr().String()),
 		bytesCounter:     bytesDelivered.WithLabelValues(format, ws.RemoteAddr().String()),
 	}
@@ -173,7 +181,14 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, format string, compress bool,
 
 	subscribersConnected.WithLabelValues(format, ws.RemoteAddr().String()).Inc()
 
-	slog.Info("adding subscriber", "remote_addr", ws.RemoteAddr().String(), "id", sub.id)
+	slog.Info("adding subscriber",
+		"remote_addr", ws.RemoteAddr().String(),
+		"id", sub.id,
+		"format", format,
+		"compress", compress,
+		"wantedTypes", wantedTypes,
+		"wantedDids", wantedDids,
+	)
 
 	return &sub
 }
@@ -228,6 +243,12 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		}
 	}
 
+	wantedDids := []string{}
+	qWantedDids := c.Request().URL.Query()["wantedDids"]
+	if len(qWantedDids) > 0 {
+		wantedDids = qWantedDids
+	}
+
 	log := slog.With("source", "server_handle_subscribe", "remote_addr", ws.RemoteAddr().String())
 
 	go func() {
@@ -241,7 +262,7 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		}
 	}()
 
-	sub := s.AddSubscriber(ws, format, compress, wantedTypes)
+	sub := s.AddSubscriber(ws, format, compress, wantedTypes, wantedDids)
 	defer s.RemoveSubscriber(sub.id)
 
 	for {
