@@ -86,14 +86,6 @@ var tracer = otel.Tracer("Jetstream")
 func Jetstream(cctx *cli.Context) error {
 	ctx := cctx.Context
 
-	// Create a channel that will be closed when we want to stop the application
-	// Usually when a critical routine returns an error
-	kill := make(chan struct{})
-
-	// Trap SIGINT to trigger a shutdown.
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
-
 	log := slog.New(slog.NewJSONHandler(os.Stdout))
 	slog.SetDefault(log)
 
@@ -194,6 +186,10 @@ func Jetstream(cctx *cli.Context) error {
 		}
 	}()
 
+	// Create a channel that will be closed when we want to stop the application
+	// Usually when a critical routine returns an error
+	livenessKill := make(chan struct{})
+
 	// Start a goroutine to manage the liveness checker, shutting down if no events are received for 15 seconds
 	shutdownLivenessChecker := make(chan struct{})
 	livenessCheckerShutdown := make(chan struct{})
@@ -212,7 +208,7 @@ func Jetstream(cctx *cli.Context) error {
 				seq, _ := c.Progress.Get()
 				if seq == lastSeq && seq != 0 {
 					log.Error("no new events in last 15 seconds, shutting down for docker to restart me", "seq", seq)
-					close(kill)
+					close(livenessKill)
 				} else {
 					log.Info("successful liveness check", "seq", seq)
 					lastSeq = seq
@@ -266,6 +262,10 @@ func Jetstream(cctx *cli.Context) error {
 	}
 	defer con.Close()
 
+	// Create a channel that will be closed when we want to stop the application
+	// Usually when a critical routine returns an error
+	eventsKill := make(chan struct{})
+
 	shutdownRepoStream := make(chan struct{})
 	repoStreamShutdown := make(chan struct{})
 	go func() {
@@ -275,7 +275,7 @@ func Jetstream(cctx *cli.Context) error {
 			err = events.HandleRepoStream(ctx, con, scheduler)
 			if !errors.Is(err, context.Canceled) {
 				log.Info("HandleRepoStream returned unexpectedly, killing jetstream", "error", err)
-				close(kill)
+				close(eventsKill)
 			} else {
 				log.Info("HandleRepoStream closed on context cancel")
 			}
@@ -285,13 +285,19 @@ func Jetstream(cctx *cli.Context) error {
 		cancel()
 	}()
 
+	// Trap SIGINT to trigger a shutdown.
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+
 	select {
 	case <-signals:
 		log.Info("shutting down on signal")
 	case <-ctx.Done():
 		log.Info("shutting down on context done")
-	case <-kill:
-		log.Info("shutting down on kill")
+	case <-livenessKill:
+		log.Info("shutting down on liveness kill")
+	case <-eventsKill:
+		log.Info("shutting down on events kill")
 	}
 
 	log.Info("shutting down, waiting for workers to clean up...")
