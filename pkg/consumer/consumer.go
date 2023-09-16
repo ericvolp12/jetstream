@@ -209,7 +209,7 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 
 	lastSeqGauge.WithLabelValues(c.SocketURL).Set(float64(evt.Seq))
 
-	log := slog.With("repo", evt.Repo, "seq", evt.Seq, "commit", evt.Commit)
+	log := slog.With("repo", evt.Repo, "seq", evt.Seq, "commit", evt.Commit.String())
 
 	span.AddEvent("Read Repo From Car")
 	rr, err := repo.ReadRepoFromCar(ctx, bytes.NewReader(evt.Blocks))
@@ -255,7 +255,7 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				log.Error("update record op missing cid")
 				break
 			}
-			// Grab the record from the merkel tree
+			// Grab the record from the merkle tree
 			blk, err := rr.Blockstore().Get(ctx, cid.Cid(*op.Cid))
 			if err != nil {
 				e := fmt.Errorf("getting block %s within seq %d for %s: %w", *op.Cid, evt.Seq, evt.Repo, err)
@@ -274,6 +274,9 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				Seq:    evt.Seq,
 				OpType: EvtCreateRecord,
 			}
+
+			subj := ""
+
 			switch rec := rec.(type) {
 			case *bsky.ActorProfile:
 				e.Profile = rec
@@ -300,71 +303,19 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 			case *bsky.FeedLike:
 				e.Like = rec
 				e.RecType = "like"
-				// Track likes in db
-				nsid := strings.Split(op.Path, "/")[0]
-				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
-				err = c.DB.Update(func(txn *badger.Txn) error {
-					err := txn.Set([]byte(key), []byte(rec.Subject.Uri))
-					if err != nil {
-						return fmt.Errorf("badger txn.set: %w", err)
-					}
-					return nil
-				})
-				if err != nil {
-					log.Error("failed to track like in badger", "error", err)
-					break
-				}
+				subj = rec.Subject.Uri
 			case *bsky.FeedRepost:
 				e.Repost = rec
 				e.RecType = "repost"
-				// Track reposts in db
-				nsid := strings.Split(op.Path, "/")[0]
-				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
-				err = c.DB.Update(func(txn *badger.Txn) error {
-					err := txn.Set([]byte(key), []byte(rec.Subject.Uri))
-					if err != nil {
-						return fmt.Errorf("badger txn.set: %w", err)
-					}
-					return nil
-				})
-				if err != nil {
-					log.Error("failed to track repost in badger", "error", err)
-					break
-				}
+				subj = rec.Subject.Uri
 			case *bsky.GraphFollow:
 				e.Follow = rec
 				e.RecType = "follow"
-				// Track follows in sqlite
-				nsid := strings.Split(op.Path, "/")[0]
-				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
-				err = c.DB.Update(func(txn *badger.Txn) error {
-					err := txn.Set([]byte(key), []byte(rec.Subject))
-					if err != nil {
-						return fmt.Errorf("badger txn.set: %w", err)
-					}
-					return nil
-				})
-				if err != nil {
-					log.Error("failed to track follow in badger", "error", err)
-					break
-				}
+				subj = rec.Subject
 			case *bsky.GraphBlock:
 				e.Block = rec
 				e.RecType = "block"
-				// Track blocks in sqlite
-				nsid := strings.Split(op.Path, "/")[0]
-				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
-				err = c.DB.Update(func(txn *badger.Txn) error {
-					err := txn.Set([]byte(key), []byte(rec.Subject))
-					if err != nil {
-						return fmt.Errorf("badger txn.set: %w", err)
-					}
-					return nil
-				})
-				if err != nil {
-					log.Error("failed to track block in badger", "error", err)
-					break
-				}
+				subj = rec.Subject
 			case *bsky.GraphList:
 				e.List = rec
 				e.RecType = "list"
@@ -379,6 +330,15 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				break
 			}
 
+			if subj != "" {
+				// Track the subject in a persistent store
+				err = c.SetSubject(ctx, evt.Repo, collection, rkey, subj)
+				if err != nil {
+					log.Warn("failed to set subject in badger", "error", err, "rkey", rkey, "subj", subj)
+					break
+				}
+			}
+
 			err = c.Emit(ctx, e)
 			if err != nil {
 				log.Error("failed to emit json", "error", err)
@@ -389,7 +349,7 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				log.Error("update record op missing cid")
 				break
 			}
-			// Grab the record from the merkel tree
+			// Grab the record from the merkle tree
 			blk, err := rr.Blockstore().Get(ctx, cid.Cid(*op.Cid))
 			if err != nil {
 				e := fmt.Errorf("getting block %s within seq %d for %s: %w", *op.Cid, evt.Seq, evt.Repo, err)
@@ -432,175 +392,52 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				OpType:    EvtDeleteRecord,
 				DeleteRef: op.Path,
 			}
-
-			nsid := strings.Split(op.Path, "/")[0]
-			switch nsid {
+			shouldDelete := false
+			switch collection {
 			case "app.bsky.feed.profile":
 				e.RecType = "profile"
 			case "app.bsky.feed.post":
 				e.RecType = "post"
 			case "app.bsky.feed.like":
 				e.RecType = "like"
-				// Lookup in db to find the subject
-				nsid := strings.Split(op.Path, "/")[0]
-				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
-
-				// Fetch the subject from badger
-				err = c.DB.View(func(txn *badger.Txn) error {
-					item, err := txn.Get([]byte(key))
-					if err != nil {
-						return fmt.Errorf("badger txn.get: %w", err)
-					}
-					valCopy, err := item.ValueCopy(nil)
-					if err != nil {
-						return fmt.Errorf("badger item.valuecopy: %w", err)
-					}
-					e.Like = &bsky.FeedLike{
-						Subject: &comatproto.RepoStrongRef{Uri: string(valCopy)},
-					}
-					return nil
-				})
+				subj, err := c.GetSubject(ctx, evt.Repo, collection, rkey)
 				if err != nil {
-					if errors.Is(err, badger.ErrKeyNotFound) {
-						log.Warn("like not found in badger", "key", key)
-						break
-					}
-					log.Error("failed to lookup like in badger", "error", err)
+					log.Warn("failed to lookup like in badger", "error", err)
 					break
 				}
 
-				// Delete from badger
-				err = c.DB.Update(func(txn *badger.Txn) error {
-					err := txn.Delete([]byte(key))
-					if err != nil {
-						return fmt.Errorf("badger txn.delete: %w", err)
-					}
-					return nil
-				})
-				if err != nil {
-					log.Error("failed to delete like from badger", "error", err)
-					break
-				}
+				e.Like = &bsky.FeedLike{Subject: &comatproto.RepoStrongRef{Uri: subj}}
+				shouldDelete = true
 			case "app.bsky.feed.repost":
 				e.RecType = "repost"
-				// Lookup in sqlite to find the subject
-				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
-				// Fetch the subject from badger
-				err = c.DB.View(func(txn *badger.Txn) error {
-					item, err := txn.Get([]byte(key))
-					if err != nil {
-						return fmt.Errorf("badger txn.get: %w", err)
-					}
-					valCopy, err := item.ValueCopy(nil)
-					if err != nil {
-						return fmt.Errorf("badger item.valuecopy: %w", err)
-					}
-					e.Repost = &bsky.FeedRepost{
-						Subject: &comatproto.RepoStrongRef{Uri: string(valCopy)},
-					}
-					return nil
-				})
+				subj, err := c.GetSubject(ctx, evt.Repo, collection, rkey)
 				if err != nil {
-					if errors.Is(err, badger.ErrKeyNotFound) {
-						log.Warn("repost not found in badger", "key", key)
-						break
-					}
-					log.Error("failed to lookup repost in badger", "error", err)
+					log.Warn("failed to lookup repost in badger", "error", err)
 					break
 				}
 
-				// Delete from badger
-				err = c.DB.Update(func(txn *badger.Txn) error {
-					err := txn.Delete([]byte(key))
-					if err != nil {
-						return fmt.Errorf("badger txn.delete: %w", err)
-					}
-					return nil
-				})
-				if err != nil {
-					log.Error("failed to delete repost from badger", "error", err)
-					break
-				}
+				e.Repost = &bsky.FeedRepost{Subject: &comatproto.RepoStrongRef{Uri: subj}}
+				shouldDelete = true
 			case "app.bsky.graph.follow":
 				e.RecType = "follow"
-				// Lookup in sqlite to find the subject
-				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
-				// Fetch the subject from badger
-				err = c.DB.View(func(txn *badger.Txn) error {
-					item, err := txn.Get([]byte(key))
-					if err != nil {
-						return fmt.Errorf("badger txn.get: %w", err)
-					}
-					valCopy, err := item.ValueCopy(nil)
-					if err != nil {
-						return fmt.Errorf("badger item.valuecopy: %w", err)
-					}
-					e.Follow = &bsky.GraphFollow{
-						Subject: string(valCopy),
-					}
-					return nil
-				})
+				subj, err := c.GetSubject(ctx, evt.Repo, collection, rkey)
 				if err != nil {
-					if errors.Is(err, badger.ErrKeyNotFound) {
-						log.Warn("follow not found in badger", "key", key)
-						break
-					}
-					log.Error("failed to lookup follow in badger", "error", err)
+					log.Warn("failed to lookup follow in badger", "error", err)
 					break
 				}
 
-				// Delete from badger
-				err = c.DB.Update(func(txn *badger.Txn) error {
-					err := txn.Delete([]byte(key))
-					if err != nil {
-						return fmt.Errorf("badger txn.delete: %w", err)
-					}
-					return nil
-				})
-				if err != nil {
-					log.Error("failed to delete follow from badger", "error", err)
-					break
-				}
+				e.Follow = &bsky.GraphFollow{Subject: subj}
+				shouldDelete = true
 			case "app.bsky.graph.block":
 				e.RecType = "block"
-				// Lookup in sqlite to find the subject
-				key := fmt.Sprintf("%s_%s_%s", evt.Repo, nsid, rkey)
-				// Fetch the subject from badger
-				err = c.DB.View(func(txn *badger.Txn) error {
-					item, err := txn.Get([]byte(key))
-					if err != nil {
-						return fmt.Errorf("badger txn.get: %w", err)
-					}
-					valCopy, err := item.ValueCopy(nil)
-					if err != nil {
-						return fmt.Errorf("badger item.valuecopy: %w", err)
-					}
-					e.Block = &bsky.GraphBlock{
-						Subject: string(valCopy),
-					}
-					return nil
-				})
+				subj, err := c.GetSubject(ctx, evt.Repo, collection, rkey)
 				if err != nil {
-					if errors.Is(err, badger.ErrKeyNotFound) {
-						log.Warn("block not found in badger", "key", key)
-						break
-					}
-					log.Error("failed to lookup block in badger", "error", err)
+					log.Warn("failed to lookup block in badger", "error", err)
 					break
 				}
 
-				// Delete from badger
-				err = c.DB.Update(func(txn *badger.Txn) error {
-					err := txn.Delete([]byte(key))
-					if err != nil {
-						return fmt.Errorf("badger txn.delete: %w", err)
-					}
-					return nil
-				})
-				if err != nil {
-					log.Error("failed to delete block from badger", "error", err)
-					break
-				}
+				e.Block = &bsky.GraphBlock{Subject: subj}
+				shouldDelete = true
 			case "app.bsky.graph.list":
 				e.RecType = "list"
 			case "app.bsky.graph.listitem":
@@ -610,6 +447,13 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 			default:
 				log.Warn("unknown record type", "op", op.Path)
 				break
+			}
+
+			if shouldDelete {
+				err = c.DeleteKey(ctx, evt.Repo, collection, rkey)
+				if err != nil {
+					log.Warn("failed to delete key from badger", "error", err, "rkey", rkey)
+				}
 			}
 
 			err = c.Emit(ctx, e)
@@ -623,5 +467,68 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 	}
 
 	eventProcessingDurationHistogram.WithLabelValues(c.SocketURL).Observe(time.Since(processedAt).Seconds())
+	return nil
+}
+
+func (c *Consumer) SetSubject(ctx context.Context, did, collection, rkey, subject string) error {
+	ctx, span := tracer.Start(ctx, "SetSubject")
+	defer span.End()
+
+	key := fmt.Sprintf("%s_%s_%s", did, collection, rkey)
+	err := c.DB.Update(func(txn *badger.Txn) error {
+		err := txn.Set([]byte(key), []byte(subject))
+		if err != nil {
+			return fmt.Errorf("badger txn.set: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to set subject in badger: %w", err)
+	}
+	return nil
+}
+
+func (c *Consumer) GetSubject(ctx context.Context, did, collection, rkey string) (string, error) {
+	ctx, span := tracer.Start(ctx, "GetSubject")
+	defer span.End()
+
+	key := fmt.Sprintf("%s_%s_%s", did, collection, rkey)
+	var subject string
+	err := c.DB.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(key))
+		if err != nil {
+			return fmt.Errorf("badger txn.get: %w", err)
+		}
+		valCopy, err := item.ValueCopy(nil)
+		if err != nil {
+			return fmt.Errorf("badger item.valuecopy: %w", err)
+		}
+		subject = string(valCopy)
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return "", fmt.Errorf("subject not found in badger: %w", err)
+		}
+		return "", fmt.Errorf("failed to lookup subject in badger: %w", err)
+	}
+	return subject, nil
+}
+
+func (c *Consumer) DeleteKey(ctx context.Context, did, collection, rkey string) error {
+	ctx, span := tracer.Start(ctx, "DeleteKey")
+	defer span.End()
+
+	key := fmt.Sprintf("%s_%s_%s", did, collection, rkey)
+	err := c.DB.Update(func(txn *badger.Txn) error {
+		err := txn.Delete([]byte(key))
+		if err != nil {
+			return fmt.Errorf("badger txn.delete: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete key from badger: %w", err)
+	}
 	return nil
 }
