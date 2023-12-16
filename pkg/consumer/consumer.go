@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -16,8 +17,6 @@ import (
 	"github.com/dgraph-io/badger/v4"
 	"github.com/goccy/go-json"
 	"github.com/ipfs/go-cid"
-	"github.com/labstack/gommon/log"
-	"golang.org/x/exp/slog"
 
 	"github.com/bluesky-social/indigo/events"
 	"github.com/bluesky-social/indigo/repo"
@@ -140,7 +139,7 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 	case xe.RepoCommit != nil:
 		eventsProcessedCounter.WithLabelValues("repo_commit", c.SocketURL).Inc()
 		if xe.RepoCommit.TooBig {
-			log.Warn("repo commit too big", "repo", xe.RepoCommit.Repo, "seq", xe.RepoCommit.Seq, "rev", xe.RepoCommit.Rev)
+			slog.Warn("repo commit too big", "repo", xe.RepoCommit.Repo, "seq", xe.RepoCommit.Seq, "rev", xe.RepoCommit.Rev)
 			return nil
 		}
 		return c.HandleRepoCommit(ctx, xe.RepoCommit)
@@ -151,7 +150,7 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 		// Parse time from the event time string
 		t, err := time.Parse(time.RFC3339, xe.RepoHandle.Time)
 		if err != nil {
-			log.Errorf("error parsing time: %+v", err)
+			slog.Error("error parsing time", "error", err)
 			return nil
 		}
 
@@ -164,7 +163,7 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 		}
 		err = c.Emit(ctx, e)
 		if err != nil {
-			log.Error("failed to emit json", "error", err)
+			slog.Error("failed to emit json", "error", err)
 		}
 		lastEvtCreatedAtGauge.WithLabelValues(c.SocketURL).Set(float64(t.UnixNano()))
 		lastEvtProcessedAtGauge.WithLabelValues(c.SocketURL).Set(float64(now.UnixNano()))
@@ -179,7 +178,7 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 		// Parse time from the event time string
 		t, err := time.Parse(time.RFC3339, xe.RepoMigrate.Time)
 		if err != nil {
-			log.Errorf("error parsing time: %+v", err)
+			slog.Error("error parsing time", "error", err)
 			return nil
 		}
 		lastEvtCreatedAtGauge.WithLabelValues(c.SocketURL).Set(float64(t.UnixNano()))

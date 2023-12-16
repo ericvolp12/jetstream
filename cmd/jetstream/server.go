@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -14,8 +16,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus"
-	"golang.org/x/exp/slices"
-	"golang.org/x/exp/slog"
+	"github.com/segmentio/kafka-go"
 )
 
 var (
@@ -39,11 +40,22 @@ type Server struct {
 	Subscribers map[int64]*Subscriber
 	lk          sync.RWMutex
 	nextSub     int64
+	kafkaWriter *kafka.Writer
+	topic       string
+	seq         int64
+	seqlk       sync.Mutex
 }
 
-func NewServer() *Server {
+func NewServer(broker, topic string) *Server {
+	kafkaWriter := kafka.NewWriter(kafka.WriterConfig{
+		Brokers: []string{broker},
+		Topic:   topic,
+	})
+
 	return &Server{
 		Subscribers: make(map[int64]*Subscriber),
+		kafkaWriter: kafkaWriter,
+		topic:       topic,
 	}
 }
 
@@ -56,6 +68,11 @@ func ZstdCompress(src []byte) []byte {
 func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	ctx, span := tracer.Start(ctx, "Emit")
 	defer span.End()
+
+	s.seqlk.Lock()
+	s.seq++
+	jsSeq := s.seq
+	s.seqlk.Unlock()
 
 	log := slog.With("source", "server_emit")
 
@@ -71,21 +88,33 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 
 	biggestBufSize := 0
 
+	asJSON := &bytes.Buffer{}
+	err := json.NewEncoder(asJSON).Encode(e)
+	if err != nil {
+		return fmt.Errorf("failed to encode event as json: %w", err)
+	}
+	b := asJSON.Bytes()
+	if len(b) > biggestBufSize {
+		biggestBufSize = len(b)
+	}
+	jsonData = &b
+
+	// Emit to Kafka
+	if jsonData != nil {
+		err := s.kafkaWriter.WriteMessages(ctx, kafka.Message{
+			Key:   []byte(fmt.Sprintf("event-%d", jsSeq)),
+			Value: *jsonData,
+		})
+
+		if err != nil {
+			log.Error("failed to send event to Kafka", "error", err)
+			return err
+		}
+	}
+
 	// Check if any subscribers want zstd
 	for _, sub := range s.Subscribers {
 		if sub.format == "json" {
-			if jsonData == nil {
-				asJSON := &bytes.Buffer{}
-				err := json.NewEncoder(asJSON).Encode(e)
-				if err != nil {
-					return fmt.Errorf("failed to encode event as json: %w", err)
-				}
-				b := asJSON.Bytes()
-				if len(b) > biggestBufSize {
-					biggestBufSize = len(b)
-				}
-				jsonData = &b
-			}
 			if sub.compress && compressedJSON == nil {
 				b := ZstdCompress(*jsonData)
 				compressedJSON = &b

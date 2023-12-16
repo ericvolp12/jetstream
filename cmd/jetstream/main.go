@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -21,7 +22,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
-	"golang.org/x/exp/slog"
 
 	"github.com/urfave/cli/v2"
 )
@@ -70,6 +70,18 @@ func main() {
 			Value:   "data/badger",
 			EnvVars: []string{"DB_DIR"},
 		},
+		&cli.StringFlag{
+			Name:    "kafka-brokers",
+			Usage:   "comma separated list of kafka brokers to connect to",
+			Value:   "localhost:9092",
+			EnvVars: []string{"KAFKA_BROKERS"},
+		},
+		&cli.StringFlag{
+			Name:    "kafka-topic",
+			Usage:   "kafka topic to write events to",
+			Value:   "jetstream-events",
+			EnvVars: []string{"KAFKA_TOPIC"},
+		},
 	}
 
 	app.Action = Jetstream
@@ -86,7 +98,7 @@ var tracer = otel.Tracer("Jetstream")
 func Jetstream(cctx *cli.Context) error {
 	ctx := cctx.Context
 
-	log := slog.New(slog.NewJSONHandler(os.Stdout))
+	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(log)
 
 	log.Info("starting jetstream")
@@ -110,7 +122,7 @@ func Jetstream(cctx *cli.Context) error {
 		}()
 	}
 
-	s := NewServer()
+	s := NewServer(cctx.String("kafka-brokers"), cctx.String("kafka-topic"))
 
 	db, err := badger.Open(badger.DefaultOptions(cctx.String("db-dir")))
 	if err != nil {
