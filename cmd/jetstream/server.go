@@ -132,7 +132,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 
 	// Emit to Kafka
 	if jsonData != nil {
-		err := s.kafkaWriter.WriteMessages(ctx, kafka.Message{
+		err := s.kafkaWriter.WriteMessages(ctx, kgo.Message{
 			Key:   []byte(fmt.Sprintf("event-%d", jsSeq)),
 			Value: *jsonData,
 		})
