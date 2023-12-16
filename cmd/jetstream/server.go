@@ -5,18 +5,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"log/slog"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/ericvolp12/jetstream/pkg/consumer"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gorilla/websocket"
 	"github.com/klauspost/compress/zstd"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/segmentio/kafka-go"
+	kgo "github.com/segmentio/kafka-go"
 )
 
 var (
@@ -40,14 +42,43 @@ type Server struct {
 	Subscribers map[int64]*Subscriber
 	lk          sync.RWMutex
 	nextSub     int64
-	kafkaWriter *kafka.Writer
+	kafkaWriter *kgo.Writer
 	topic       string
 	seq         int64
 	seqlk       sync.Mutex
 }
 
 func NewServer(broker, topic string) *Server {
-	kafkaWriter := kafka.NewWriter(kafka.WriterConfig{
+	// Create a Kafka admin client
+	adminClient, err := kafka.NewAdminClient(&kafka.ConfigMap{"bootstrap.servers": broker})
+	if err != nil {
+		log.Fatalf("Failed to create Kafka admin client: %s", err)
+	}
+
+	// Check if the topic exists
+	metadata, err := adminClient.GetMetadata(&topic, false, 5000)
+	if err != nil || metadata.Topics[topic].Error.Code() != kafka.ErrNoError {
+		// If the topic does not exist, create it
+		topicSpec := kafka.TopicSpecification{
+			Topic:             topic,
+			NumPartitions:     1, // Set as needed
+			ReplicationFactor: 1, // Set as needed
+		}
+		results, err := adminClient.CreateTopics(context.Background(), []kafka.TopicSpecification{topicSpec})
+		if err != nil {
+			log.Fatalf("Failed to create Kafka topic: %s", err)
+		}
+		for _, result := range results {
+			if result.Error.Code() != kafka.ErrNoError {
+				log.Fatalf("Failed to create topic: %s", result.Error)
+			}
+		}
+	}
+
+	// Close the admin client
+	adminClient.Close()
+
+	kafkaWriter := kgo.NewWriter(kgo.WriterConfig{
 		Brokers: []string{broker},
 		Topic:   topic,
 	})

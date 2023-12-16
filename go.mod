@@ -6,6 +6,7 @@ toolchain go1.21.1
 
 require (
 	github.com/bluesky-social/indigo v0.0.0-20231216010655-ad730a7da4f5
+	github.com/confluentinc/confluent-kafka-go v1.9.2
 	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/ericvolp12/bsky-experiments v0.0.0-20231201044208-137e3e04c531
 	github.com/fxamacker/cbor/v2 v2.5.0
