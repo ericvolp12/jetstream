@@ -5,20 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"log/slog"
 	"slices"
 	"sync"
 	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/ericvolp12/jetstream/pkg/consumer"
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gorilla/websocket"
 	"github.com/klauspost/compress/zstd"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus"
-	kgo "github.com/segmentio/kafka-go"
 )
 
 var (
@@ -39,55 +37,44 @@ type Subscriber struct {
 }
 
 type Server struct {
-	Subscribers map[int64]*Subscriber
-	lk          sync.RWMutex
-	nextSub     int64
-	kafkaWriter *kgo.Writer
-	topic       string
-	seq         int64
-	seqlk       sync.Mutex
+	Subscribers   map[int64]*Subscriber
+	lk            sync.RWMutex
+	nextSub       int64
+	kafkaProducer *kafka.Producer
+	topic         string
 }
 
-func NewServer(broker, topic string) *Server {
+func NewServer(broker, topic string) (*Server, error) {
 	// Create a Kafka admin client
-	adminClient, err := kafka.NewAdminClient(&kafka.ConfigMap{"bootstrap.servers": broker})
-	if err != nil {
-		log.Fatalf("Failed to create Kafka admin client: %s", err)
-	}
+	slog.Info("creating Kafka admin client", "broker", broker, "topic", topic)
 
-	// Check if the topic exists
-	metadata, err := adminClient.GetMetadata(&topic, false, 5000)
-	if err != nil || metadata.Topics[topic].Error.Code() != kafka.ErrNoError {
-		// If the topic does not exist, create it
-		topicSpec := kafka.TopicSpecification{
-			Topic:             topic,
-			NumPartitions:     1, // Set as needed
-			ReplicationFactor: 1, // Set as needed
-		}
-		results, err := adminClient.CreateTopics(context.Background(), []kafka.TopicSpecification{topicSpec})
-		if err != nil {
-			log.Fatalf("Failed to create Kafka topic: %s", err)
-		}
-		for _, result := range results {
-			if result.Error.Code() != kafka.ErrNoError {
-				log.Fatalf("Failed to create topic: %s", result.Error)
-			}
-		}
-	}
-
-	// Close the admin client
-	adminClient.Close()
-
-	kafkaWriter := kgo.NewWriter(kgo.WriterConfig{
-		Brokers: []string{broker},
-		Topic:   topic,
+	p, err := kafka.NewProducer(&kafka.ConfigMap{
+		"bootstrap.servers": broker,
 	})
 
-	return &Server{
-		Subscribers: make(map[int64]*Subscriber),
-		kafkaWriter: kafkaWriter,
-		topic:       topic,
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Kafka producer: %w", err)
 	}
+
+	// Delivery report handler for produced messages
+	go func() {
+		for e := range p.Events() {
+			switch ev := e.(type) {
+			case *kafka.Message:
+				if ev.TopicPartition.Error != nil {
+					slog.Error("failed to deliver message", "error", ev.TopicPartition.Error)
+				} else {
+					slog.Debug("delivered message", "topic", *ev.TopicPartition.Topic, "partition", ev.TopicPartition.Partition, "offset", ev.TopicPartition.Offset)
+				}
+			}
+		}
+	}()
+
+	return &Server{
+		Subscribers:   make(map[int64]*Subscriber),
+		kafkaProducer: p,
+		topic:         topic,
+	}, nil
 }
 
 var encoder, _ = zstd.NewWriter(nil)
@@ -99,11 +86,6 @@ func ZstdCompress(src []byte) []byte {
 func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	ctx, span := tracer.Start(ctx, "Emit")
 	defer span.End()
-
-	s.seqlk.Lock()
-	s.seq++
-	jsSeq := s.seq
-	s.seqlk.Unlock()
 
 	log := slog.With("source", "server_emit")
 
@@ -132,11 +114,14 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 
 	// Emit to Kafka
 	if jsonData != nil {
-		err := s.kafkaWriter.WriteMessages(ctx, kgo.Message{
-			Key:   []byte(fmt.Sprintf("event-%d", jsSeq)),
+		err := s.kafkaProducer.Produce(&kafka.Message{
+			TopicPartition: kafka.TopicPartition{
+				Topic:     &s.topic,
+				Partition: kafka.PartitionAny,
+			},
+			Key:   []byte(e.Did),
 			Value: *jsonData,
-		})
-
+		}, nil)
 		if err != nil {
 			log.Error("failed to send event to Kafka", "error", err)
 			return err

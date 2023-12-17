@@ -16,9 +16,9 @@ run: .env
 .PHONY: up
 up:
 	@echo "Starting Jetstream..."
-	docker-compose up -d --build
+	docker compose up -d --build
 
 .PHONY: down
 down:
 	@echo "Stopping Jetstream..."
-	docker-compose down
+	docker compose down

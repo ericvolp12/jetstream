@@ -122,7 +122,10 @@ func Jetstream(cctx *cli.Context) error {
 		}()
 	}
 
-	s := NewServer(cctx.String("kafka-brokers"), cctx.String("kafka-topic"))
+	s, err := NewServer(cctx.String("kafka-brokers"), cctx.String("kafka-topic"))
+	if err != nil {
+		return fmt.Errorf("failed to create server: %w", err)
+	}
 
 	db, err := badger.Open(badger.DefaultOptions(cctx.String("db-dir")))
 	if err != nil {

@@ -6,7 +6,7 @@ toolchain go1.21.1
 
 require (
 	github.com/bluesky-social/indigo v0.0.0-20231216010655-ad730a7da4f5
-	github.com/confluentinc/confluent-kafka-go v1.9.2
+	github.com/confluentinc/confluent-kafka-go/v2 v2.3.0
 	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/ericvolp12/bsky-experiments v0.0.0-20231201044208-137e3e04c531
 	github.com/fxamacker/cbor/v2 v2.5.0
@@ -16,7 +16,6 @@ require (
 	github.com/klauspost/compress v1.17.4
 	github.com/labstack/echo/v4 v4.11.3
 	github.com/prometheus/client_golang v1.17.0
-	github.com/segmentio/kafka-go v0.4.47
 	github.com/urfave/cli/v2 v2.26.0
 	go.opentelemetry.io/otel v1.21.0
 )
@@ -81,7 +80,6 @@ require (
 	github.com/multiformats/go-varint v0.0.7 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/petar/GoLLRB v0.0.0-20210522233825-ae3b015fd3e9 // indirect
-	github.com/pierrec/lz4/v4 v4.1.15 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/polydawn/refmt v0.89.1-0.20221221234430-40501e09de1f // indirect
 	github.com/prometheus/client_model v0.5.0 // indirect
