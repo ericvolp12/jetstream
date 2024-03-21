@@ -15,7 +15,6 @@ import (
 
 	"github.com/bluesky-social/indigo/events"
 	"github.com/bluesky-social/indigo/events/schedulers/autoscaling"
-	"github.com/dgraph-io/badger/v4"
 	"github.com/ericvolp12/bsky-experiments/pkg/tracing"
 	"github.com/ericvolp12/jetstream/pkg/consumer"
 	"github.com/gorilla/websocket"
@@ -30,7 +29,7 @@ func main() {
 	app := cli.App{
 		Name:    "jetstream",
 		Usage:   "atproto firehose translation service",
-		Version: "0.0.2",
+		Version: "0.0.3",
 	}
 
 	app.Flags = []cli.Flag{
@@ -64,23 +63,18 @@ func main() {
 			Value:   "./cursor.json",
 			EnvVars: []string{"CURSOR_FILE"},
 		},
-		&cli.StringFlag{
-			Name:    "db-dir",
-			Usage:   "path to the badger db directory",
-			Value:   "data/badger",
-			EnvVars: []string{"DB_DIR"},
+		&cli.StringSliceFlag{
+			Name:     "kafka-brokers",
+			Usage:    "comma separated list of kafka brokers to connect to",
+			EnvVars:  []string{"KAFKA_BROKERS"},
+			Required: false,
 		},
 		&cli.StringFlag{
-			Name:    "kafka-brokers",
-			Usage:   "comma separated list of kafka brokers to connect to",
-			Value:   "localhost:9092",
-			EnvVars: []string{"KAFKA_BROKERS"},
-		},
-		&cli.StringFlag{
-			Name:    "kafka-topic",
-			Usage:   "kafka topic to write events to",
-			Value:   "jetstream-events",
-			EnvVars: []string{"KAFKA_TOPIC"},
+			Name:     "kafka-topic",
+			Usage:    "kafka topic to write events to",
+			Value:    "jetstream-events",
+			EnvVars:  []string{"KAFKA_TOPIC"},
+			Required: false,
 		},
 	}
 
@@ -122,22 +116,15 @@ func Jetstream(cctx *cli.Context) error {
 		}()
 	}
 
-	s, err := NewServer(cctx.String("kafka-brokers"), cctx.String("kafka-topic"))
+	s, err := NewServer(cctx.StringSlice("kafka-brokers"), cctx.String("kafka-topic"))
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
 	}
-
-	db, err := badger.Open(badger.DefaultOptions(cctx.String("db-dir")))
-	if err != nil {
-		return fmt.Errorf("failed to open badger db: %w", err)
-	}
-	defer db.Close()
 
 	c, err := consumer.NewConsumer(
 		ctx,
 		u.String(),
 		cctx.String("cursor-file"),
-		db,
 		s.Emit,
 	)
 	if err != nil {
@@ -169,33 +156,6 @@ func Jetstream(cctx *cli.Context) error {
 				err := c.WriteCursor(ctx)
 				if err != nil {
 					log.Error("failed to write cursor", "error", err)
-				}
-			}
-		}
-	}()
-
-	// Start a goroutine to garbage collect Badger every 5 minutes
-	shutdownBadgerGC := make(chan struct{})
-	badgerGCShutdown := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		log := log.With("source", "badger_gc")
-
-		for {
-			select {
-			case <-shutdownBadgerGC:
-				log.Info("shutting down badger gc")
-				err := db.RunValueLogGC(0.5)
-				if err != nil {
-					log.Error("failed to run badger gc", "error", err)
-				}
-				log.Info("badger gc shut down successfully")
-				close(badgerGCShutdown)
-				return
-			case <-ticker.C:
-				err := db.RunValueLogGC(0.5)
-				if err != nil {
-					log.Error("failed to run badger gc", "error", err)
 				}
 			}
 		}
@@ -320,13 +280,11 @@ func Jetstream(cctx *cli.Context) error {
 	close(shutdownLivenessChecker)
 	close(shutdownCursorManager)
 	close(shutdownEcho)
-	close(shutdownBadgerGC)
 
 	<-repoStreamShutdown
 	<-livenessCheckerShutdown
 	<-cursorManagerShutdown
 	<-echoShutdown
-	<-badgerGCShutdown
 	log.Info("shut down successfully")
 
 	return nil

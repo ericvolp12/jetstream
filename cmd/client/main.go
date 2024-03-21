@@ -3,13 +3,12 @@ package main
 import (
 	"fmt"
 	"log"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 const (
-	serverAddr = "ws://localhost:8080/subscribe"
+	serverAddr = "ws://localhost:6008/subscribe"
 )
 
 func main() {
@@ -28,8 +27,5 @@ func main() {
 
 		// Print the received message
 		fmt.Printf("Received: %s\n", msg)
-
-		// Wait 1 second
-		time.Sleep(1 * time.Second)
 	}
 }

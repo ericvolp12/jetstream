@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/ericvolp12/jetstream/pkg/consumer"
 	"github.com/fxamacker/cbor/v2"
@@ -24,16 +25,16 @@ var (
 )
 
 type Subscriber struct {
-	ws               *websocket.Conn
-	seq              int64
-	buf              chan []byte
-	id               int64
-	format           string
-	compress         bool
-	deliveredCounter prometheus.Counter
-	bytesCounter     prometheus.Counter
-	wantedTypes      []string
-	wantedDids       []string
+	ws                *websocket.Conn
+	seq               int64
+	buf               chan []byte
+	id                int64
+	format            string
+	compress          bool
+	deliveredCounter  prometheus.Counter
+	bytesCounter      prometheus.Counter
+	wantedCollections []string
+	wantedDids        []string
 }
 
 type Server struct {
@@ -44,37 +45,42 @@ type Server struct {
 	topic         string
 }
 
-func NewServer(broker, topic string) (*Server, error) {
-	// Create a Kafka admin client
-	slog.Info("creating Kafka admin client", "broker", broker, "topic", topic)
-
-	p, err := kafka.NewProducer(&kafka.ConfigMap{
-		"bootstrap.servers": broker,
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Kafka producer: %w", err)
+func NewServer(brokers []string, topic string) (*Server, error) {
+	s := Server{
+		Subscribers: make(map[int64]*Subscriber),
 	}
 
-	// Delivery report handler for produced messages
-	go func() {
-		for e := range p.Events() {
-			switch ev := e.(type) {
-			case *kafka.Message:
-				if ev.TopicPartition.Error != nil {
-					slog.Error("failed to deliver message", "error", ev.TopicPartition.Error)
-				} else {
-					slog.Debug("delivered message", "topic", *ev.TopicPartition.Topic, "partition", ev.TopicPartition.Partition, "offset", ev.TopicPartition.Offset)
+	if len(brokers) > 0 {
+		// Create a Kafka admin client
+		slog.Info("creating Kafka admin client", "broker", brokers, "topic", topic)
+
+		p, err := kafka.NewProducer(&kafka.ConfigMap{
+			"bootstrap.servers": brokers,
+		})
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Kafka producer: %w", err)
+		}
+
+		// Delivery report handler for produced messages
+		go func() {
+			for e := range p.Events() {
+				switch ev := e.(type) {
+				case *kafka.Message:
+					if ev.TopicPartition.Error != nil {
+						slog.Error("failed to deliver message", "error", ev.TopicPartition.Error)
+					} else {
+						slog.Debug("delivered message", "topic", *ev.TopicPartition.Topic, "partition", ev.TopicPartition.Partition, "offset", ev.TopicPartition.Offset)
+					}
 				}
 			}
-		}
-	}()
+		}()
 
-	return &Server{
-		Subscribers:   make(map[int64]*Subscriber),
-		kafkaProducer: p,
-		topic:         topic,
-	}, nil
+		s.kafkaProducer = p
+		s.topic = topic
+	}
+
+	return &s, nil
 }
 
 var encoder, _ = zstd.NewWriter(nil)
@@ -113,7 +119,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	jsonData = &b
 
 	// Emit to Kafka
-	if jsonData != nil {
+	if s.kafkaProducer != nil {
 		err := s.kafkaProducer.Produce(&kafka.Message{
 			TopicPartition: kafka.TopicPartition{
 				Topic:     &s.topic,
@@ -161,8 +167,8 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
-		if len(sub.wantedTypes) > 0 {
-			if !slices.Contains(sub.wantedTypes, e.RecType) {
+		if len(sub.wantedCollections) > 0 {
+			if !slices.Contains(sub.wantedCollections, e.Collection) {
 				continue
 			}
 		}
@@ -205,20 +211,20 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	return nil
 }
 
-func (s *Server) AddSubscriber(ws *websocket.Conn, format string, compress bool, wantedTypes []string, wantedDids []string) *Subscriber {
+func (s *Server) AddSubscriber(ws *websocket.Conn, format string, compress bool, wantedCollections []string, wantedDids []string) *Subscriber {
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
 	sub := Subscriber{
-		ws:               ws,
-		buf:              make(chan []byte, 100),
-		id:               s.nextSub,
-		format:           format,
-		compress:         compress,
-		wantedTypes:      wantedTypes,
-		wantedDids:       wantedDids,
-		deliveredCounter: eventsDelivered.WithLabelValues(format, ws.RemoteAddr().String()),
-		bytesCounter:     bytesDelivered.WithLabelValues(format, ws.RemoteAddr().String()),
+		ws:                ws,
+		buf:               make(chan []byte, 100),
+		id:                s.nextSub,
+		format:            format,
+		compress:          compress,
+		wantedCollections: wantedCollections,
+		wantedDids:        wantedDids,
+		deliveredCounter:  eventsDelivered.WithLabelValues(format, ws.RemoteAddr().String()),
+		bytesCounter:      bytesDelivered.WithLabelValues(format, ws.RemoteAddr().String()),
 	}
 
 	s.Subscribers[s.nextSub] = &sub
@@ -231,7 +237,7 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, format string, compress bool,
 		"id", sub.id,
 		"format", format,
 		"compress", compress,
-		"wantedTypes", wantedTypes,
+		"wantedCollections", wantedCollections,
 		"wantedDids", wantedDids,
 	)
 
@@ -250,7 +256,6 @@ func (s *Server) RemoveSubscriber(num int64) {
 }
 
 var validFormats = []string{"json", "cbor"}
-var validRecordTypes = []string{"post", "like", "repost", "follow", "block", "list", "listItem", "feedGenerator", "handle", "profile"}
 
 func (s *Server) HandleSubscribe(c echo.Context) error {
 	ctx, cancel := context.WithCancel(c.Request().Context())
@@ -275,23 +280,28 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 
 	compress := c.QueryParam("compress") == "true"
 
-	wantedTypes := []string{}
-	qWantedTypes := c.Request().URL.Query()["wantedTypes"]
-	if len(qWantedTypes) > 0 {
-		for _, t := range qWantedTypes {
-			for _, v := range validRecordTypes {
-				if t == v {
-					wantedTypes = append(wantedTypes, t)
-					break
-				}
+	wantedCollections := []string{}
+	qWantedCollections := c.Request().URL.Query()["wantedCollections"]
+	if len(qWantedCollections) > 0 {
+		for _, c := range qWantedCollections {
+			col, err := syntax.ParseNSID(c)
+			if err != nil {
+				return fmt.Errorf("invalid collection: %s", c)
 			}
+			wantedCollections = append(wantedCollections, col.String())
 		}
 	}
 
 	wantedDids := []string{}
 	qWantedDids := c.Request().URL.Query()["wantedDids"]
 	if len(qWantedDids) > 0 {
-		wantedDids = qWantedDids
+		for _, d := range qWantedDids {
+			did, err := syntax.ParseDID(d)
+			if err != nil {
+				return fmt.Errorf("invalid did: %s", d)
+			}
+			wantedDids = append(wantedDids, did.String())
+		}
 	}
 
 	log := slog.With("source", "server_handle_subscribe", "remote_addr", ws.RemoteAddr().String())
@@ -307,7 +317,7 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		}
 	}()
 
-	sub := s.AddSubscriber(ws, format, compress, wantedTypes, wantedDids)
+	sub := s.AddSubscriber(ws, format, compress, wantedCollections, wantedDids)
 	defer s.RemoveSubscriber(sub.id)
 
 	for {
