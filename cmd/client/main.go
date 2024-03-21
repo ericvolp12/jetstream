@@ -26,6 +26,6 @@ func main() {
 		}
 
 		// Print the received message
-		fmt.Printf("Received: %s\n", msg)
+		fmt.Printf("Received: %s", msg)
 	}
 }
