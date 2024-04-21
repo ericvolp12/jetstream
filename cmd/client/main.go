@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"log/slog"
 
-	"github.com/gorilla/websocket"
+	"github.com/ericvolp12/jetstream/pkg/client"
+	"github.com/ericvolp12/jetstream/pkg/consumer"
 )
 
 const (
@@ -12,20 +15,28 @@ const (
 )
 
 func main() {
-	// Connect to WebSocket server
-	c, _, err := websocket.DefaultDialer.Dial(serverAddr, nil)
+	config := client.DefaultClientConfig()
+	config.WebsocketURL = serverAddr
+
+	c, err := client.NewClient(config)
 	if err != nil {
-		log.Fatal("Failed to connect:", err)
+		log.Fatalf("failed to create client: %v", err)
 	}
-	defer c.Close()
 
-	for {
-		_, msg, err := c.ReadMessage()
-		if err != nil {
-			log.Fatal("Failed to read message:", err)
-		}
+	c.Handler = &handler{}
 
-		// Print the received message
-		fmt.Printf("Received: %s", msg)
+	ctx := context.Background()
+
+	if err := c.ConnectAndRead(ctx); err != nil {
+		log.Fatalf("failed to connect: %v", err)
 	}
+
+	slog.Info("shutdown")
+}
+
+type handler struct{}
+
+func (h *handler) OnEvent(ctx context.Context, event *consumer.Event) error {
+	fmt.Printf("received event: %+v\n", event)
+	return nil
 }

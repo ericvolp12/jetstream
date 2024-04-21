@@ -30,9 +30,10 @@ The following Query Parameters are supported:
 - `compress` - Whether or not to use `zstd` compression on all messages in the stream for your client (default `false`)
   - `true` - enables compression
 - `wantedCollections` - An array of [Collection NSIDs](https://atproto.com/specs/nsid) to filter which records you receive on your stream (default empty = all types)
+- `wantedDids` - An array of Repo DIDs to filter which records you receive on your stream (Default empty = all repos)
 
 A maximal example using all parameters looks like:
 
 ```
-ws://localhost:6008/subscribe?format=cbor&compress=true&wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like&wantedCollections=app.bsky.graph.follow
+ws://localhost:6008/subscribe?format=cbor&compress=true&wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like&wantedCollections=app.bsky.graph.follow&wantedDids=did:plc:q6gjnaw2blty4crticxkmujt
 ```
