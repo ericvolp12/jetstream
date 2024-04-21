@@ -37,6 +37,6 @@ func main() {
 type handler struct{}
 
 func (h *handler) OnEvent(ctx context.Context, event *consumer.Event) error {
-	fmt.Printf("received event: %+v\n", event)
+	fmt.Printf("received event: %#v\n", event)
 	return nil
 }

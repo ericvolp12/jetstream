@@ -51,11 +51,11 @@ func main() {
 			Value:   10,
 			EnvVars: []string{"MAX_QUEUE_SIZE"},
 		},
-		&cli.IntFlag{
-			Name:    "port",
-			Usage:   "port to serve echo on",
-			Value:   8080,
-			EnvVars: []string{"PORT"},
+		&cli.StringFlag{
+			Name:    "listen-addr",
+			Usage:   "addr to serve echo on",
+			Value:   ":6008",
+			EnvVars: []string{"LISTEN_ADDR"},
 		},
 		&cli.StringFlag{
 			Name:    "cursor-file",
@@ -200,7 +200,7 @@ func Jetstream(cctx *cli.Context) error {
 	e.GET("/subscribe", s.HandleSubscribe)
 
 	httpServer := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cctx.Int("port")),
+		Addr:    cctx.String("listen-addr"),
 		Handler: e,
 	}
 
@@ -210,7 +210,7 @@ func Jetstream(cctx *cli.Context) error {
 	go func() {
 		logger := log.With("source", "echo_server")
 
-		logger.Info("echo server listening", "port", cctx.Int("port"))
+		logger.Info("echo server listening", "addr", cctx.String("listen-addr"))
 
 		go func() {
 			if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {

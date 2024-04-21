@@ -12,6 +12,6 @@ services:
     environment:
       - CURSOR_FILE=/data/cursor.json
     ports:
-      - "6008:8080"
+      - "6008:6008"
     volumes:
       - ./data:/data
