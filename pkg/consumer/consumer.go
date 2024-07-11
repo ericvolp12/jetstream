@@ -3,18 +3,19 @@ package consumer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	comatproto "github.com/bluesky-social/indigo/api/atproto"
 	"github.com/bluesky-social/indigo/atproto/data"
-	"github.com/goccy/go-json"
-
 	"github.com/bluesky-social/indigo/events"
 	"github.com/bluesky-social/indigo/repo"
 	"github.com/bluesky-social/indigo/repomgr"
@@ -50,6 +51,10 @@ func (p *Progress) Get() (int64, time.Time) {
 	return p.LastSeq, p.LastSeqProcessedAt
 }
 
+func (p *Progress) GetPath() string {
+	return p.path
+}
+
 var tracer = otel.Tracer("consumer")
 
 // WriteCursor writes the cursor to file
@@ -70,6 +75,30 @@ func (c *Consumer) WriteCursor(ctx context.Context) error {
 
 	// Write the cursor JSON to disk
 	err = os.WriteFile(c.Progress.path, data, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write cursor to file: %+v", err)
+	}
+
+	return nil
+}
+
+func (c *Consumer) WriteCursorToFile(ctx context.Context, filename string) error {
+	ctx, span := tracer.Start(ctx, "WriteCursorToFile")
+	defer span.End()
+
+	// Marshal the cursor JSON
+	seq, processedAt := c.Progress.Get()
+	p := Progress{
+		LastSeq:            seq,
+		LastSeqProcessedAt: processedAt,
+	}
+	data, err := json.Marshal(&p)
+	if err != nil {
+		return fmt.Errorf("failed to marshal cursor JSON: %+v", err)
+	}
+
+	// Write the cursor JSON to the specific file
+	err = os.WriteFile(filename, data, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to write cursor to file: %+v", err)
 	}
@@ -113,15 +142,55 @@ func NewConsumer(
 		Emit: emit,
 	}
 
-	// Check to see if the cursor exists
+	// First attempt to read the cursor
 	err := c.ReadCursor(context.Background())
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("failed to read cursor from file: %+v", err)
-		}
-		slog.Warn("cursor not found on disk, starting from live")
+
+	if err == nil {
+		return &c, nil
 	}
 
+	slog.Warn("Original Cursor file load failed. Attempting to use backups")
+	// The cursor was not found on disk, so attempt to read from the latest backup instead.
+	dir := filepath.Dir(progPath)
+	files, err := filepath.Glob(filepath.Join(dir, "*-cursor-backup.json"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve backup files: %+v", err)
+	}
+
+	// Sort the files in reverse (latest backup first)
+	sort.Slice(files, func(i, j int) bool {
+		return files[i] > files[j]
+	})
+
+	for _, backupFile := range files {
+		data, err := os.ReadFile(backupFile)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("failed to read backup cursor from file: %+v", err)
+		}
+
+		if err := json.Unmarshal(data, c.Progress); err == nil {
+			slog.Warn("cursor restored from backup", "file", backupFile)
+			return &c, nil
+		}
+	}
+
+	// If all backup cursors failed to load, delete all cursors and backups and start from live
+	for _, file := range files {
+		if err := os.Remove(file); err != nil {
+			return nil, fmt.Errorf("failed to delete backup file: %v", err)
+		}
+	}
+
+	if err := os.Remove(c.Progress.path); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("failed to delete cursor file: %+v", err)
+		}
+	}
+
+	slog.Warn("cursor not found on disk, all backups failed to load, starting from live")
 	return &c, nil
 }
 
@@ -271,6 +340,7 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				Collection: collection,
 				RKey:       rkey,
 				Record:     rec,
+				Cid:        op.Cid.String(),
 			}
 
 			err = c.Emit(ctx, e)
