@@ -29,57 +29,6 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-func getBackupFileName(cursorFilePath string) string {
-	timestamp := time.Now().Format("20060102-150405")
-	dir, _ := filepath.Split(cursorFilePath)
-	return filepath.Join(dir, fmt.Sprintf("%s-cursor-backup.json", timestamp))
-}
-
-func checkAndDeleteOldBackups(cursorFilePath string, log slog.Logger) {
-	log.Info("Created cursor backup. Checking old backups.")
-
-	dir := filepath.Dir(cursorFilePath)
-
-	dirEntries, err := os.ReadDir(dir)
-	if err != nil {
-		log.Error("failed to read directory", "error", err)
-		return
-	}
-
-	var backups []fs.DirEntry
-	for _, v := range dirEntries {
-		if v.IsDir() {
-			continue
-		}
-		if strings.Contains(v.Name(), "-cursor-backup.json") {
-			backups = append(backups, v)
-		}
-	}
-
-	sort.Slice(backups, func(i, j int) bool {
-		infoI, errI := backups[i].Info()
-		infoJ, errJ := backups[j].Info()
-		if errI != nil {
-			log.Error("failed to get file info", "error", errI, "file", backups[i].Name())
-			return false
-		}
-		if errJ != nil {
-			log.Error("failed to get file info", "error", errJ, "file", backups[j].Name())
-			return false
-		}
-		return infoI.ModTime().Before(infoJ.ModTime())
-	})
-
-	for len(backups) > 10 {
-		err = os.Remove(filepath.Join(dir, backups[0].Name()))
-		if err != nil {
-			log.Error("failed to remove old backup", "error", err, "file", backups[0].Name())
-			return
-		}
-		backups = backups[1:]
-	}
-}
-
 func main() {
 	app := cli.App{
 		Name:    "jetstream",
@@ -352,4 +301,55 @@ func Jetstream(cctx *cli.Context) error {
 	log.Info("shut down successfully")
 
 	return nil
+}
+
+func getBackupFileName(cursorFilePath string) string {
+	timestamp := time.Now().Format("20060102-150405")
+	dir, _ := filepath.Split(cursorFilePath)
+	return filepath.Join(dir, fmt.Sprintf("%s-cursor-backup.json", timestamp))
+}
+
+func checkAndDeleteOldBackups(cursorFilePath string, log slog.Logger) {
+	log.Info("Created cursor backup. Checking old backups.")
+
+	dir := filepath.Dir(cursorFilePath)
+
+	dirEntries, err := os.ReadDir(dir)
+	if err != nil {
+		log.Error("failed to read directory", "error", err)
+		return
+	}
+
+	var backups []fs.DirEntry
+	for _, v := range dirEntries {
+		if v.IsDir() {
+			continue
+		}
+		if strings.Contains(v.Name(), "-cursor-backup.json") {
+			backups = append(backups, v)
+		}
+	}
+
+	sort.Slice(backups, func(i, j int) bool {
+		infoI, errI := backups[i].Info()
+		infoJ, errJ := backups[j].Info()
+		if errI != nil {
+			log.Error("failed to get file info", "error", errI, "file", backups[i].Name())
+			return false
+		}
+		if errJ != nil {
+			log.Error("failed to get file info", "error", errJ, "file", backups[j].Name())
+			return false
+		}
+		return infoI.ModTime().Before(infoJ.ModTime())
+	})
+
+	for len(backups) > 10 {
+		err = os.Remove(filepath.Join(dir, backups[0].Name()))
+		if err != nil {
+			log.Error("failed to remove old backup", "error", err, "file", backups[0].Name())
+			return
+		}
+		backups = backups[1:]
+	}
 }
