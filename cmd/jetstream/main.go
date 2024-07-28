@@ -138,6 +138,7 @@ func Jetstream(cctx *cli.Context) error {
 	shutdownCursorManager := make(chan struct{})
 	cursorManagerShutdown := make(chan struct{})
 	go func() {
+		ctx := context.Background()
 		ticker := time.NewTicker(5 * time.Second)
 		log := log.With("source", "cursor_manager")
 
