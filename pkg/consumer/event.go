@@ -6,6 +6,7 @@ type Event struct {
 	OpType     string `json:"opType"`
 	Collection string `json:"collection,omitempty"`
 	RKey       string `json:"rkey,omitempty"`
+	Cid        string `json:"cid,omitempty"`
 
 	Record any `json:"record,omitempty"`
 }
