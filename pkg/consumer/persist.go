@@ -140,7 +140,7 @@ func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateL
 
 	// Limit the playback rate to avoid thrashing the host when replaying events
 	// with very specific filters
-	limiter := rate.NewLimiter(rate.Limit(playbackRateLimit), 1000)
+	limiter := rate.NewLimiter(rate.Limit(playbackRateLimit), int(playbackRateLimit))
 
 	// Iterate over all events starting from the cursor
 	iter, err := c.DB.NewIter(&pebble.IterOptions{
