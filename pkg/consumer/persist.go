@@ -176,8 +176,13 @@ func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateL
 			return fmt.Errorf("invalid key format: %s", key)
 		}
 
+		collection := ""
+		if len(parts) > 2 {
+			collection = parts[2]
+		}
+
 		// Emit the event
-		err = emit(ctx, parts[1], parts[2], iter.Value)
+		err = emit(ctx, parts[1], collection, iter.Value)
 		if err != nil {
 			log.Error("failed to emit event", "error", err)
 			return fmt.Errorf("failed to emit event: %w", err)
