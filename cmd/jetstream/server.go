@@ -24,6 +24,7 @@ var (
 
 type Subscriber struct {
 	ws                *websocket.Conn
+	realIP            string
 	seq               int64
 	buf               chan *[]byte
 	id                int64
@@ -128,28 +129,29 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, e 
 	return nil
 }
 
-func (s *Server) AddSubscriber(ws *websocket.Conn, wantedCollections []string, wantedDids []string, cursor *int64) *Subscriber {
+func (s *Server) AddSubscriber(ws *websocket.Conn, realIP string, wantedCollections []string, wantedDids []string, cursor *int64) *Subscriber {
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
 	sub := Subscriber{
 		ws:                ws,
+		realIP:            realIP,
 		buf:               make(chan *[]byte, 100),
 		id:                s.nextSub,
 		wantedCollections: wantedCollections,
 		wantedDids:        wantedDids,
 		cursor:            cursor,
-		deliveredCounter:  eventsDelivered.WithLabelValues(ws.RemoteAddr().String()),
-		bytesCounter:      bytesDelivered.WithLabelValues(ws.RemoteAddr().String()),
+		deliveredCounter:  eventsDelivered.WithLabelValues(realIP),
+		bytesCounter:      bytesDelivered.WithLabelValues(realIP),
 	}
 
 	s.Subscribers[s.nextSub] = &sub
 	s.nextSub++
 
-	subscribersConnected.WithLabelValues(ws.RemoteAddr().String()).Inc()
+	subscribersConnected.WithLabelValues(realIP).Inc()
 
 	slog.Info("adding subscriber",
-		"remote_addr", ws.RemoteAddr().String(),
+		"remote_addr", realIP,
 		"id", sub.id,
 		"wantedCollections", wantedCollections,
 		"wantedDids", wantedDids,
@@ -162,9 +164,9 @@ func (s *Server) RemoveSubscriber(num int64) {
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
-	slog.Info("removing subscriber", "id", num)
+	slog.Info("removing subscriber", "id", num, "remote_addr", s.Subscribers[num].realIP)
 
-	subscribersConnected.WithLabelValues(s.Subscribers[num].ws.RemoteAddr().String()).Dec()
+	subscribersConnected.WithLabelValues(s.Subscribers[num].realIP).Dec()
 
 	delete(s.Subscribers, num)
 }
@@ -218,7 +220,7 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		}
 	}
 
-	log := slog.With("source", "server_handle_subscribe", "remote_addr", ws.RemoteAddr().String())
+	log := slog.With("source", "server_handle_subscribe", "socket_addr", ws.RemoteAddr().String(), "real_ip", c.RealIP())
 
 	go func() {
 		for {
@@ -231,7 +233,7 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		}
 	}()
 
-	sub := s.AddSubscriber(ws, wantedCollections, wantedDids, cursor)
+	sub := s.AddSubscriber(ws, c.RealIP(), wantedCollections, wantedDids, cursor)
 	defer s.RemoveSubscriber(sub.id)
 
 	if cursor != nil {
