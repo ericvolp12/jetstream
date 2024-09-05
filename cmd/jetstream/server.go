@@ -135,7 +135,6 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, e 
 		return ctx.Err()
 	case sub.buf <- b:
 		sub.seq++
-		sub.deliveredCounter.Inc()
 		sub.bytesCounter.Add(evtSize)
 	}
 
@@ -297,6 +296,7 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 				log.Error("failed to write message to websocket", "error", err)
 				return nil
 			}
+			sub.deliveredCounter.Inc()
 		}
 	}
 }
