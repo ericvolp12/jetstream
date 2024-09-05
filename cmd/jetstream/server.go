@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
 )
 
@@ -55,6 +56,8 @@ func NewServer(maxSubRate float64) (*Server, error) {
 	return &s, nil
 }
 
+var maxConcurrentEmits = 100
+
 func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	ctx, span := tracer.Start(ctx, "Emit")
 	defer span.End()
@@ -80,11 +83,14 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	wg := sync.WaitGroup{}
+	sem := semaphore.NewWeighted(int64(maxConcurrentEmits))
 	for _, sub := range s.Subscribers {
-		wg.Add(1)
+		if err := sem.Acquire(ctx, 1); err != nil {
+			log.Error("failed to acquire semaphore", "error", err)
+			return fmt.Errorf("failed to acquire semaphore: %w", err)
+		}
 		go func(sub *Subscriber) {
-			defer wg.Done()
+			defer sem.Release(1)
 			sub.cLk.Lock()
 			defer sub.cLk.Unlock()
 
@@ -96,7 +102,10 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 		}(sub)
 	}
 
-	wg.Wait()
+	if err := sem.Acquire(ctx, int64(maxConcurrentEmits)); err != nil {
+		log.Error("failed to acquire semaphore", "error", err)
+		return fmt.Errorf("failed to acquire semaphore: %w", err)
+	}
 
 	return nil
 }
@@ -114,11 +123,6 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, e 
 		}
 	}
 
-	err := sub.rl.Wait(ctx)
-	if err != nil {
-		log.Error("failed to wait for rate limiter", "error", err)
-		return fmt.Errorf("failed to wait for rate limiter: %w", err)
-	}
 	select {
 	case <-ctx.Done():
 		log.Error("failed to send event to subscriber", "error", ctx.Err(), "subscriber", sub.id)
@@ -284,6 +288,11 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 			log.Info("shutting down subscriber")
 			return nil
 		case msg := <-sub.buf:
+			err := sub.rl.Wait(ctx)
+			if err != nil {
+				log.Error("failed to wait for rate limiter", "error", err)
+				return fmt.Errorf("failed to wait for rate limiter: %w", err)
+			}
 			if err := ws.WriteMessage(websocket.TextMessage, *msg); err != nil {
 				log.Error("failed to write message to websocket", "error", err)
 				return nil
