@@ -9,6 +9,7 @@ import (
 	"github.com/cockroachdb/pebble"
 	"github.com/goccy/go-json"
 	"github.com/labstack/gommon/log"
+	"golang.org/x/time/rate"
 )
 
 // Progress is the cursor for the consumer
@@ -129,9 +130,13 @@ func (c *Consumer) TrimEvents(ctx context.Context) error {
 var finalKey = []byte("9700000000000000")
 
 // ReplayEvents replays events from PebbleDB
-func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, emit func(context.Context, Event) error) error {
+func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateLimit float64, emit func(context.Context, Event) error) error {
 	ctx, span := tracer.Start(ctx, "ReplayEvents")
 	defer span.End()
+
+	// Limit the playback rate to avoid thrashing the host when replaying events
+	// with very specific filters
+	limiter := rate.NewLimiter(rate.Limit(playbackRateLimit), 1000)
 
 	// Iterate over all events starting from the cursor
 	iter, err := c.DB.NewIter(&pebble.IterOptions{
@@ -149,6 +154,13 @@ func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, emit func(con
 	// if you never reach the end of the database, you'll just keep consuming slower than the events are produced
 	for iter.First(); iter.Valid(); iter.Next() {
 		data := iter.Value()
+
+		// Wait for the rate limiter
+		err := limiter.Wait(ctx)
+		if err != nil {
+			log.Error("failed to wait for rate limiter", "error", err)
+			return fmt.Errorf("failed to wait for rate limiter: %w", err)
+		}
 
 		// Unmarshal the event JSON
 		var evt Event

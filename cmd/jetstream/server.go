@@ -252,8 +252,9 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 
 	if cursor != nil {
 		log.Info("replaying events", "cursor", *cursor)
+		playbackRateLimit := s.maxSubRate * 2
 		go func() {
-			err := s.Consumer.ReplayEvents(ctx, *cursor, func(ctx context.Context, e consumer.Event) error {
+			err := s.Consumer.ReplayEvents(ctx, *cursor, playbackRateLimit, func(ctx context.Context, e consumer.Event) error {
 				asJSON := &bytes.Buffer{}
 				err := json.NewEncoder(asJSON).Encode(e)
 				if err != nil {
