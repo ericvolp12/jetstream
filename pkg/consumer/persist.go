@@ -1,7 +1,9 @@
 package consumer
 
 import (
+	"bytes"
 	"context"
+	"encoding/gob"
 	"fmt"
 	"sync"
 	"time"
@@ -88,16 +90,18 @@ func (c *Consumer) PersistEvent(ctx context.Context, evt *Event) error {
 	ctx, span := tracer.Start(ctx, "PersistEvent")
 	defer span.End()
 
-	// Persist the event to PebbleDB
-	data, err := json.Marshal(evt)
+	// Persist the event to PebbleDB as a GOB
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	err := enc.Encode(evt)
 	if err != nil {
-		log.Error("failed to marshal event", "error", err)
-		return fmt.Errorf("failed to marshal event: %w", err)
+		log.Error("failed to encode event", "error", err)
+		return fmt.Errorf("failed to encode event: %w", err)
 	}
 
 	key := []byte(fmt.Sprintf("%d", evt.TimeUS))
 
-	err = c.DB.Set(key, data, pebble.Sync)
+	err = c.DB.Set(key, buf.Bytes(), pebble.Sync)
 	if err != nil {
 		log.Error("failed to write event to pebble", "error", err)
 		return fmt.Errorf("failed to write event to pebble: %w", err)
@@ -162,12 +166,13 @@ func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateL
 			return fmt.Errorf("failed to wait for rate limiter: %w", err)
 		}
 
-		// Unmarshal the event JSON
-		var evt Event
-		err = json.Unmarshal(data, &evt)
+		// Unmarshal the event GOB
+		dec := gob.NewDecoder(bytes.NewReader(data))
+		evt := Event{}
+		err = dec.Decode(&evt)
 		if err != nil {
-			log.Error("failed to unmarshal event", "error", err)
-			return fmt.Errorf("failed to unmarshal event: %w", err)
+			log.Error("failed to decode event", "error", err)
+			return fmt.Errorf("failed to decode event: %w", err)
 		}
 
 		// Emit the event
