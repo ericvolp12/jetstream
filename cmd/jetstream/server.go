@@ -257,6 +257,8 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 			_, _, err := ws.ReadMessage()
 			if err != nil {
 				log.Error("failed to read message from websocket", "error", err)
+				cancel()
+				return
 			}
 		}
 	}()
