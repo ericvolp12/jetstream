@@ -100,7 +100,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 			if sub.cursor != nil {
 				return
 			}
-			emitToSubscriber(ctx, log, sub, e.Did, collection, &b, evtSize)
+			emitToSubscriber(ctx, log, sub, e.Did, collection, func() []byte { return b })
 		}(sub)
 	}
 
@@ -112,7 +112,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	return nil
 }
 
-func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, did, collection string, b *[]byte, evtSize float64) error {
+func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, did, collection string, value func() []byte) error {
 	if len(sub.wantedCollections) > 0 && collection != "" {
 		if _, ok := sub.wantedCollections[collection]; !ok {
 			return nil
@@ -125,6 +125,8 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, di
 		}
 	}
 
+	v := value()
+
 	select {
 	case <-ctx.Done():
 		log.Error("failed to send event to subscriber", "error", ctx.Err(), "subscriber", sub.id)
@@ -135,10 +137,10 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, di
 			log.Error("failed to close subscriber connection", "error", err)
 		}
 		return ctx.Err()
-	case sub.buf <- b:
+	case sub.buf <- &v:
 		sub.seq++
 		sub.deliveredCounter.Inc()
-		sub.bytesCounter.Add(evtSize)
+		sub.bytesCounter.Add(float64(len(v)))
 	}
 
 	return nil
@@ -266,14 +268,11 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		log.Info("replaying events", "cursor", *cursor)
 		playbackRateLimit := s.maxSubRate * 10
 		go func() {
-			err := s.Consumer.ReplayEvents(ctx, *cursor, playbackRateLimit, func(ctx context.Context, did, collection string, b *[]byte) error {
-				evtSize := float64(len(*b))
-				bytesEmitted.Add(evtSize)
-
+			err := s.Consumer.ReplayEvents(ctx, *cursor, playbackRateLimit, func(ctx context.Context, did, collection string, value func() []byte) error {
 				ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 				defer cancel()
 
-				return emitToSubscriber(ctx, log, sub, did, collection, b, evtSize)
+				return emitToSubscriber(ctx, log, sub, did, collection, value)
 			})
 			if err != nil {
 				log.Error("failed to replay events", "error", err)

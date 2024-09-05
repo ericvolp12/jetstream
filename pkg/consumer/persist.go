@@ -3,6 +3,7 @@ package consumer
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -95,7 +96,14 @@ func (c *Consumer) PersistEvent(ctx context.Context, evt *Event) error {
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
 
-	key := []byte(fmt.Sprintf("%d", evt.TimeUS))
+	// Key structure for events in PebbleDB
+	// {{event_time_us}}_{{repo}}_{{collection}}
+	var key []byte
+	if evt.EventType == EventCommit && evt.Commit != nil {
+		key = []byte(fmt.Sprintf("%d_%s_%s", evt.TimeUS, evt.Did, evt.Commit.Collection))
+	} else {
+		key = []byte(fmt.Sprintf("%d_%s", evt.TimeUS, evt.Did))
+	}
 
 	err = c.DB.Set(key, data, pebble.Sync)
 	if err != nil {
@@ -130,7 +138,7 @@ func (c *Consumer) TrimEvents(ctx context.Context) error {
 var finalKey = []byte("9700000000000000")
 
 // ReplayEvents replays events from PebbleDB
-func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateLimit float64, emit func(context.Context, string, string, *[]byte) error) error {
+func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateLimit float64, emit func(context.Context, string, string, func() []byte) error) error {
 	ctx, span := tracer.Start(ctx, "ReplayEvents")
 	defer span.End()
 
@@ -153,8 +161,6 @@ func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateL
 	// and stopping when it reaches the end of the database
 	// if you never reach the end of the database, you'll just keep consuming slower than the events are produced
 	for iter.First(); iter.Valid(); iter.Next() {
-		data := iter.Value()
-
 		// Wait for the rate limiter
 		err := limiter.Wait(ctx)
 		if err != nil {
@@ -162,21 +168,16 @@ func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateL
 			return fmt.Errorf("failed to wait for rate limiter: %w", err)
 		}
 
-		// Unmarshal the event JSON
-		var evt Event
-		err = json.Unmarshal(data, &evt)
-		if err != nil {
-			log.Error("failed to unmarshal event", "error", err)
-			return fmt.Errorf("failed to unmarshal event: %w", err)
-		}
-
-		collection := ""
-		if evt.EventType == EventCommit && evt.Commit != nil {
-			collection = evt.Commit.Collection
+		// Unpack the key ({{event_time_us}}_{{repo}}_{{collection}})
+		key := string(iter.Key())
+		parts := strings.Split(key, "_")
+		if len(parts) < 2 {
+			log.Error("invalid key format", "key", key)
+			return fmt.Errorf("invalid key format: %s", key)
 		}
 
 		// Emit the event
-		err = emit(ctx, evt.Did, collection, &data)
+		err = emit(ctx, parts[1], parts[2], iter.Value)
 		if err != nil {
 			log.Error("failed to emit event", "error", err)
 			return fmt.Errorf("failed to emit event: %w", err)
