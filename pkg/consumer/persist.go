@@ -164,7 +164,7 @@ func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateL
 
 		// Unmarshal the event JSON
 		var evt Event
-		err := json.Unmarshal(data, &evt)
+		err = json.Unmarshal(data, &evt)
 		if err != nil {
 			log.Error("failed to unmarshal event", "error", err)
 			return fmt.Errorf("failed to unmarshal event: %w", err)
