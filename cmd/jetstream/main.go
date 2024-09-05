@@ -282,12 +282,16 @@ func Jetstream(cctx *cli.Context) error {
 	close(shutdownCursorManager)
 	close(shutdownEcho)
 
-	c.DB.Close()
-
 	<-repoStreamShutdown
 	<-livenessCheckerShutdown
 	<-cursorManagerShutdown
 	<-echoShutdown
+
+	err = c.DB.Close()
+	if err != nil {
+		log.Error("failed to close pebble db", "error", err)
+	}
+
 	log.Info("shut down successfully")
 
 	return nil
