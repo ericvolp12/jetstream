@@ -20,6 +20,8 @@ To consume Jetstream you can use any websocket client
 
 Connect to `ws://localhost:6008/subscribe` to start the stream
 
+- A publicly available instance of Jetstream is available at `wss://jetstream.atproto.tools/subscribe`
+
 The following Query Parameters are supported:
 
 - `wantedCollections` - An array of [Collection NSIDs](https://atproto.com/specs/nsid) to filter which records you receive on your stream (default empty = all collections)
@@ -31,8 +33,8 @@ The following Query Parameters are supported:
 
 A maximal example using all parameters looks like:
 
-```
-ws://localhost:6008/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like&wantedCollections=app.bsky.graph.follow&wantedDids=did:plc:q6gjnaw2blty4crticxkmujt&cursor=1725519626134432
+```bash
+$ websocat "wss://jetstream.atproto.tools/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like&wantedCollections=app.bsky.graph.follow&wantedDids=did:plc:q6gjnaw2blty4crticxkmujt&cursor=1725519626134432"
 ```
 
 ### Example events:
