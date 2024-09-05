@@ -102,7 +102,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 			if sub.cursor != nil {
 				return
 			}
-			emitToSubscriber(ctx, log, sub, e.Did, collection, getEncodedEvent)
+			emitToSubscriber(ctx, log, sub, e.Did, collection, false, getEncodedEvent)
 		}(sub)
 	}
 
@@ -114,7 +114,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	return nil
 }
 
-func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, did, collection string, getEncodedEvent func() []byte) error {
+func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, did, collection string, copyOnWrite bool, getEncodedEvent func() []byte) error {
 	if len(sub.wantedCollections) > 0 && collection != "" {
 		if _, ok := sub.wantedCollections[collection]; !ok {
 			return nil
@@ -128,6 +128,9 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, di
 	}
 
 	evtBytes := getEncodedEvent()
+	if copyOnWrite {
+		evtBytes = append([]byte{}, evtBytes...)
+	}
 
 	select {
 	case <-ctx.Done():
@@ -274,7 +277,7 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 				ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 				defer cancel()
 
-				return emitToSubscriber(ctx, log, sub, did, collection, getEncodedEvent)
+				return emitToSubscriber(ctx, log, sub, did, collection, true, getEncodedEvent)
 			})
 			if err != nil {
 				log.Error("failed to replay events", "error", err)
