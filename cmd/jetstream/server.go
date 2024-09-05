@@ -165,7 +165,7 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, realIP string, wantedCollecti
 	subscribersConnected.WithLabelValues(realIP).Inc()
 
 	slog.Info("adding subscriber",
-		"remote_addr", realIP,
+		"real_ip", realIP,
 		"id", sub.id,
 		"wantedCollections", wantedCollections,
 		"wantedDids", wantedDids,
@@ -178,7 +178,7 @@ func (s *Server) RemoveSubscriber(num int64) {
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
-	slog.Info("removing subscriber", "id", num, "remote_addr", s.Subscribers[num].realIP)
+	slog.Info("removing subscriber", "id", num, "real_ip", s.Subscribers[num].realIP)
 
 	subscribersConnected.WithLabelValues(s.Subscribers[num].realIP).Dec()
 
