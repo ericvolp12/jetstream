@@ -1,11 +1,11 @@
 module github.com/ericvolp12/jetstream
 
-go 1.21
+go 1.22
 
-toolchain go1.21.1
+toolchain go1.22.3
 
 require (
-	github.com/bluesky-social/indigo v0.0.0-20240313175749-733547c2ba2c
+	github.com/bluesky-social/indigo v0.0.0-20240905024844-a4f38639767f
 	github.com/confluentinc/confluent-kafka-go/v2 v2.3.0
 	github.com/ericvolp12/bsky-experiments v0.0.0-20231201044208-137e3e04c531
 	github.com/fxamacker/cbor/v2 v2.5.0
@@ -59,6 +59,10 @@ require (
 	github.com/ipld/go-car/v2 v2.13.1 // indirect
 	github.com/ipld/go-codec-dagpb v1.6.0 // indirect
 	github.com/ipld/go-ipld-prime v0.21.0 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a // indirect
+	github.com/jackc/pgx/v5 v5.5.0 // indirect
+	github.com/jackc/puddle/v2 v2.2.1 // indirect
 	github.com/jbenet/goprocess v0.1.4 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
@@ -86,7 +90,7 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/whyrusleeping/cbor v0.0.0-20171005072247-63513f603b11 // indirect
-	github.com/whyrusleeping/cbor-gen v0.1.1-0.20240311221002-68b9f235c302 // indirect
+	github.com/whyrusleeping/cbor-gen v0.1.3-0.20240904181319-8dc02b38228c // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xrash/smetrics v0.0.0-20231213231151-1d8dd44e695e // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.46.1 // indirect
@@ -102,7 +106,8 @@ require (
 	golang.org/x/crypto v0.21.0 // indirect
 	golang.org/x/exp v0.0.0-20231214170342-aacd6d4b4611 // indirect
 	golang.org/x/net v0.21.0 // indirect
-	golang.org/x/sys v0.18.0 // indirect
+	golang.org/x/sync v0.5.0 // indirect
+	golang.org/x/sys v0.22.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
@@ -111,6 +116,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231212172506-995d672761c0 // indirect
 	google.golang.org/grpc v1.60.0 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
-	gorm.io/gorm v1.25.5 // indirect
+	gorm.io/driver/postgres v1.5.7 // indirect
+	gorm.io/gorm v1.25.9 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect
 )

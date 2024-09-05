@@ -131,18 +131,18 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 	defer span.End()
 	switch {
 	case xe.RepoCommit != nil:
-		eventsProcessedCounter.WithLabelValues("repo_commit", c.SocketURL).Inc()
+		eventsProcessedCounter.WithLabelValues("commit", c.SocketURL).Inc()
 		if xe.RepoCommit.TooBig {
 			slog.Warn("repo commit too big", "repo", xe.RepoCommit.Repo, "seq", xe.RepoCommit.Seq, "rev", xe.RepoCommit.Rev)
 			return nil
 		}
 		return c.HandleRepoCommit(ctx, xe.RepoCommit)
-	case xe.RepoHandle != nil:
-		eventsProcessedCounter.WithLabelValues("repo_handle", c.SocketURL).Inc()
+	case xe.RepoIdentity != nil:
+		eventsProcessedCounter.WithLabelValues("identity", c.SocketURL).Inc()
 		now := time.Now()
-		c.Progress.Update(xe.RepoHandle.Seq, now)
+		c.Progress.Update(xe.RepoIdentity.Seq, now)
 		// Parse time from the event time string
-		t, err := time.Parse(time.RFC3339, xe.RepoHandle.Time)
+		t, err := time.Parse(time.RFC3339, xe.RepoIdentity.Time)
 		if err != nil {
 			slog.Error("error parsing time", "error", err)
 			return nil
@@ -150,9 +150,10 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 
 		// Emit handle update
 		e := Event{
-			Did:    xe.RepoHandle.Did,
-			Seq:    xe.RepoHandle.Seq,
-			OpType: EvtUpdateRecord,
+			Did:       xe.RepoIdentity.Did,
+			TimeUS:    now.UnixMicro(),
+			EventType: EventIdentity,
+			Payload:   xe.RepoIdentity,
 		}
 		err = c.Emit(ctx, e)
 		if err != nil {
@@ -161,31 +162,36 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 		lastEvtCreatedAtGauge.WithLabelValues(c.SocketURL).Set(float64(t.UnixNano()))
 		lastEvtProcessedAtGauge.WithLabelValues(c.SocketURL).Set(float64(now.UnixNano()))
 		lastEvtCreatedEvtProcessedGapGauge.WithLabelValues(c.SocketURL).Set(float64(now.Sub(t).Seconds()))
-		lastSeqGauge.WithLabelValues(c.SocketURL).Set(float64(xe.RepoHandle.Seq))
-	case xe.RepoInfo != nil:
-		eventsProcessedCounter.WithLabelValues("repo_info", c.SocketURL).Inc()
-	case xe.RepoMigrate != nil:
-		eventsProcessedCounter.WithLabelValues("repo_migrate", c.SocketURL).Inc()
+		lastSeqGauge.WithLabelValues(c.SocketURL).Set(float64(xe.RepoIdentity.Seq))
+	case xe.RepoAccount != nil:
+		eventsProcessedCounter.WithLabelValues("account", c.SocketURL).Inc()
 		now := time.Now()
-		c.Progress.Update(xe.RepoHandle.Seq, now)
+		c.Progress.Update(xe.RepoAccount.Seq, now)
 		// Parse time from the event time string
-		t, err := time.Parse(time.RFC3339, xe.RepoMigrate.Time)
+		t, err := time.Parse(time.RFC3339, xe.RepoAccount.Time)
 		if err != nil {
 			slog.Error("error parsing time", "error", err)
 			return nil
 		}
+
+		// Emit handle update
+		e := Event{
+			Did:       xe.RepoAccount.Did,
+			TimeUS:    now.UnixMicro(),
+			EventType: EventAccount,
+			Payload:   xe.RepoAccount,
+		}
+		err = c.Emit(ctx, e)
+		if err != nil {
+			slog.Error("failed to emit json", "error", err)
+		}
 		lastEvtCreatedAtGauge.WithLabelValues(c.SocketURL).Set(float64(t.UnixNano()))
 		lastEvtProcessedAtGauge.WithLabelValues(c.SocketURL).Set(float64(now.UnixNano()))
 		lastEvtCreatedEvtProcessedGapGauge.WithLabelValues(c.SocketURL).Set(float64(now.Sub(t).Seconds()))
-		lastSeqGauge.WithLabelValues(c.SocketURL).Set(float64(xe.RepoHandle.Seq))
-	case xe.RepoTombstone != nil:
-		eventsProcessedCounter.WithLabelValues("repo_tombstone", c.SocketURL).Inc()
-	case xe.LabelInfo != nil:
-		eventsProcessedCounter.WithLabelValues("label_info", c.SocketURL).Inc()
-	case xe.LabelLabels != nil:
-		eventsProcessedCounter.WithLabelValues("label_labels", c.SocketURL).Inc()
+		lastSeqGauge.WithLabelValues(c.SocketURL).Set(float64(xe.RepoAccount.Seq))
 	case xe.Error != nil:
 		eventsProcessedCounter.WithLabelValues("error", c.SocketURL).Inc()
+		return fmt.Errorf("error from firehose: %s", xe.Error.Message)
 	}
 	return nil
 }
@@ -241,6 +247,13 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 		span.SetAttributes(attribute.String("rkey", rkey))
 		span.SetAttributes(attribute.Int64("seq", evt.Seq))
 		span.SetAttributes(attribute.String("event_kind", op.Action))
+
+		e := Event{
+			Did:       evt.Repo,
+			TimeUS:    time.Now().UnixMicro(),
+			EventType: EventCommit,
+		}
+
 		switch ek {
 		case repomgr.EvtKindCreateRecord:
 			if op.Cid == nil {
@@ -264,10 +277,9 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				return fmt.Errorf("failed to unmarshal record: %w", err)
 			}
 
-			e := Event{
-				Did:        evt.Repo,
-				Seq:        evt.Seq,
-				OpType:     EvtCreateRecord,
+			e.Payload = Commit{
+				Rev:        evt.Rev,
+				OpType:     CommitCreateRecord,
 				Collection: collection,
 				RKey:       rkey,
 				Record:     rec,
@@ -275,7 +287,7 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 
 			err = c.Emit(ctx, e)
 			if err != nil {
-				log.Error("failed to emit json", "error", err)
+				log.Error("failed to emit event", "error", err)
 				break
 			}
 		case repomgr.EvtKindUpdateRecord:
@@ -300,10 +312,9 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				return fmt.Errorf("failed to unmarshal record: %w", err)
 			}
 
-			e := Event{
-				Did:        evt.Repo,
-				Seq:        evt.Seq,
-				OpType:     EvtUpdateRecord,
+			e.Payload = Commit{
+				Rev:        evt.Rev,
+				OpType:     CommitUpdateRecord,
 				Collection: collection,
 				RKey:       rkey,
 				Record:     rec,
@@ -311,22 +322,21 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 
 			err = c.Emit(ctx, e)
 			if err != nil {
-				log.Error("failed to emit json", "error", err)
+				log.Error("failed to emit event", "error", err)
 				break
 			}
 		case repomgr.EvtKindDeleteRecord:
 			// Emit the delete
-			e := Event{
-				Did:        evt.Repo,
-				Seq:        evt.Seq,
-				OpType:     EvtDeleteRecord,
+			e.Payload = Commit{
+				Rev:        evt.Rev,
+				OpType:     CommitDeleteRecord,
 				Collection: collection,
 				RKey:       rkey,
 			}
 
 			err = c.Emit(ctx, e)
 			if err != nil {
-				log.Error("failed to emit json", "error", err)
+				log.Error("failed to emit event", "error", err)
 				break
 			}
 		default:

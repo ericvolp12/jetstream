@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/events"
-	"github.com/bluesky-social/indigo/events/schedulers/autoscaling"
+	"github.com/bluesky-social/indigo/events/schedulers/parallel"
 	"github.com/ericvolp12/bsky-experiments/pkg/tracing"
 	"github.com/ericvolp12/jetstream/pkg/consumer"
 	"github.com/gorilla/websocket"
@@ -63,19 +63,6 @@ func main() {
 			Value:   "./cursor.json",
 			EnvVars: []string{"CURSOR_FILE"},
 		},
-		&cli.StringSliceFlag{
-			Name:     "kafka-brokers",
-			Usage:    "comma separated list of kafka brokers to connect to",
-			EnvVars:  []string{"KAFKA_BROKERS"},
-			Required: false,
-		},
-		&cli.StringFlag{
-			Name:     "kafka-topic",
-			Usage:    "kafka topic to write events to",
-			Value:    "jetstream-events",
-			EnvVars:  []string{"KAFKA_TOPIC"},
-			Required: false,
-		},
 	}
 
 	app.Action = Jetstream
@@ -116,7 +103,7 @@ func Jetstream(cctx *cli.Context) error {
 		}()
 	}
 
-	s, err := NewServer(cctx.StringSlice("kafka-brokers"), cctx.String("kafka-topic"))
+	s, err := NewServer()
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
 	}
@@ -131,8 +118,7 @@ func Jetstream(cctx *cli.Context) error {
 		return fmt.Errorf("failed to create consumer: %w", err)
 	}
 
-	schedSettings := autoscaling.DefaultAutoscaleSettings()
-	scheduler := autoscaling.NewScheduler(schedSettings, "prod-firehose", c.HandleStreamEvent)
+	scheduler := parallel.NewScheduler(100, 1_000, "prod-firehose", c.HandleStreamEvent)
 
 	// Start a goroutine to manage the cursor, saving the current cursor every 5 seconds.
 	shutdownCursorManager := make(chan struct{})
