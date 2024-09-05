@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -26,6 +27,8 @@ type Subscriber struct {
 	seq               int64
 	buf               chan *[]byte
 	id                int64
+	cLk               sync.Mutex
+	cursor            *int64
 	deliveredCounter  prometheus.Counter
 	bytesCounter      prometheus.Counter
 	wantedCollections []string
@@ -36,6 +39,7 @@ type Server struct {
 	Subscribers map[int64]*Subscriber
 	lk          sync.RWMutex
 	nextSub     int64
+	Consumer    *consumer.Consumer
 }
 
 func NewServer() (*Server, error) {
@@ -64,45 +68,26 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	}
 	b := asJSON.Bytes()
 
-	bytesEmitted.Add(float64(len(b)))
-
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	evtSize := float64(len(b))
+	bytesEmitted.Add(evtSize)
 
 	isCommit := e.EventType == consumer.EventCommit && e.Commit != nil
 
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	wg := sync.WaitGroup{}
 	for _, sub := range s.Subscribers {
 		wg.Add(1)
 		go func(sub *Subscriber) {
 			defer wg.Done()
-			if len(sub.wantedCollections) > 0 && isCommit {
-				if !slices.Contains(sub.wantedCollections, e.Commit.Collection) {
-					return
-				}
-			}
+			sub.cLk.Lock()
+			defer sub.cLk.Unlock()
 
-			if len(sub.wantedDids) > 0 {
-				if !slices.Contains(sub.wantedDids, e.Did) {
-					return
-				}
-			}
-
-			select {
-			case <-ctx.Done():
-				log.Error("failed to send event to subscriber", "error", ctx.Err(), "subscriber", sub.id)
-
-				// If we failed to send to a subscriber, close the connection
-				err := sub.ws.Close()
-				if err != nil {
-					log.Error("failed to close subscriber connection", "error", err)
-				}
+			// Don't emit to subscribers that are playing catch-up
+			if sub.cursor != nil {
 				return
-			case sub.buf <- &b:
-				sub.seq++
-				sub.deliveredCounter.Inc()
-				sub.bytesCounter.Add(float64(len(b)))
 			}
+			emitToSubscriber(ctx, log, sub, &e, isCommit, &b, evtSize)
 		}(sub)
 	}
 
@@ -111,7 +96,39 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	return nil
 }
 
-func (s *Server) AddSubscriber(ws *websocket.Conn, wantedCollections []string, wantedDids []string) *Subscriber {
+func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, e *consumer.Event, isCommit bool, b *[]byte, evtSize float64) error {
+	if len(sub.wantedCollections) > 0 && isCommit {
+		if !slices.Contains(sub.wantedCollections, e.Commit.Collection) {
+			return nil
+		}
+	}
+
+	if len(sub.wantedDids) > 0 {
+		if !slices.Contains(sub.wantedDids, e.Did) {
+			return nil
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+		log.Error("failed to send event to subscriber", "error", ctx.Err(), "subscriber", sub.id)
+
+		// If we failed to send to a subscriber, close the connection
+		err := sub.ws.Close()
+		if err != nil {
+			log.Error("failed to close subscriber connection", "error", err)
+		}
+		return ctx.Err()
+	case sub.buf <- b:
+		sub.seq++
+		sub.deliveredCounter.Inc()
+		sub.bytesCounter.Add(evtSize)
+	}
+
+	return nil
+}
+
+func (s *Server) AddSubscriber(ws *websocket.Conn, wantedCollections []string, wantedDids []string, cursor *int64) *Subscriber {
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
@@ -121,6 +138,7 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, wantedCollections []string, w
 		id:                s.nextSub,
 		wantedCollections: wantedCollections,
 		wantedDids:        wantedDids,
+		cursor:            cursor,
 		deliveredCounter:  eventsDelivered.WithLabelValues(ws.RemoteAddr().String()),
 		bytesCounter:      bytesDelivered.WithLabelValues(ws.RemoteAddr().String()),
 	}
@@ -185,6 +203,21 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		}
 	}
 
+	var cursor *int64
+	qCursor := c.Request().URL.Query().Get("cursor")
+	if qCursor != "" {
+		cursor = new(int64)
+		*cursor, err = strconv.ParseInt(qCursor, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid cursor: %s", qCursor)
+		}
+
+		// If given a future cursor, just live tail
+		if *cursor > time.Now().UnixMicro() {
+			cursor = nil
+		}
+	}
+
 	log := slog.With("source", "server_handle_subscribe", "remote_addr", ws.RemoteAddr().String())
 
 	go func() {
@@ -198,12 +231,45 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		}
 	}()
 
-	sub := s.AddSubscriber(ws, wantedCollections, wantedDids)
+	sub := s.AddSubscriber(ws, wantedCollections, wantedDids, cursor)
 	defer s.RemoveSubscriber(sub.id)
+
+	if cursor != nil {
+		log.Info("replaying events", "cursor", *cursor)
+		go func() {
+			err := s.Consumer.ReplayEvents(ctx, *cursor, func(ctx context.Context, e consumer.Event) error {
+				asJSON := &bytes.Buffer{}
+				err := json.NewEncoder(asJSON).Encode(e)
+				if err != nil {
+					return fmt.Errorf("failed to encode event as json: %w", err)
+				}
+				b := asJSON.Bytes()
+
+				evtSize := float64(len(b))
+				bytesEmitted.Add(evtSize)
+
+				isCommit := e.EventType == consumer.EventCommit && e.Commit != nil
+
+				ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				defer cancel()
+
+				return emitToSubscriber(ctx, log, sub, &e, isCommit, &b, evtSize)
+			})
+			if err != nil {
+				log.Error("failed to replay events", "error", err)
+				cancel()
+			}
+			log.Info("finished replaying events, starting live tail")
+			sub.cLk.Lock()
+			defer sub.cLk.Unlock()
+			sub.cursor = nil
+		}()
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
+			log.Info("shutting down subscriber")
 			return nil
 		case msg := <-sub.buf:
 			if err := ws.WriteMessage(websocket.TextMessage, *msg); err != nil {

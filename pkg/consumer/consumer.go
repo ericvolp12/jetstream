@@ -3,21 +3,19 @@ package consumer
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
+	"log"
 	"log/slog"
-	"os"
 	"strings"
-	"sync"
 	"time"
 
 	comatproto "github.com/bluesky-social/indigo/api/atproto"
 	"github.com/bluesky-social/indigo/atproto/data"
-	"github.com/goccy/go-json"
 
 	"github.com/bluesky-social/indigo/events"
 	"github.com/bluesky-social/indigo/repo"
 	"github.com/bluesky-social/indigo/repomgr"
+	"github.com/cockroachdb/pebble"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -27,99 +25,40 @@ type Consumer struct {
 	SocketURL string
 	Progress  *Progress
 	Emit      func(context.Context, Event) error
-}
-
-// Progress is the cursor for the consumer
-type Progress struct {
-	LastSeq            int64     `json:"last_seq"`
-	LastSeqProcessedAt time.Time `json:"last_seq_processed_at"`
-	lk                 sync.RWMutex
-	path               string
-}
-
-func (p *Progress) Update(seq int64, processedAt time.Time) {
-	p.lk.Lock()
-	defer p.lk.Unlock()
-	p.LastSeq = seq
-	p.LastSeqProcessedAt = processedAt
-}
-
-func (p *Progress) Get() (int64, time.Time) {
-	p.lk.RLock()
-	defer p.lk.RUnlock()
-	return p.LastSeq, p.LastSeqProcessedAt
+	DB        *pebble.DB
+	EventTTL  time.Duration
 }
 
 var tracer = otel.Tracer("consumer")
-
-// WriteCursor writes the cursor to file
-func (c *Consumer) WriteCursor(ctx context.Context) error {
-	ctx, span := tracer.Start(ctx, "WriteCursor")
-	defer span.End()
-
-	// Marshal the cursor JSON
-	seq, processedAt := c.Progress.Get()
-	p := Progress{
-		LastSeq:            seq,
-		LastSeqProcessedAt: processedAt,
-	}
-	data, err := json.Marshal(&p)
-	if err != nil {
-		return fmt.Errorf("failed to marshal cursor JSON: %+v", err)
-	}
-
-	// Write the cursor JSON to disk
-	err = os.WriteFile(c.Progress.path, data, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to write cursor to file: %+v", err)
-	}
-
-	return nil
-}
-
-// ReadCursor reads the cursor from file
-func (c *Consumer) ReadCursor(ctx context.Context) error {
-	ctx, span := tracer.Start(ctx, "ReadCursor")
-	defer span.End()
-
-	// Read the cursor from disk
-	data, err := os.ReadFile(c.Progress.path)
-	if err != nil {
-		return fmt.Errorf("failed to read cursor from file: %w", err)
-	}
-
-	// Unmarshal the cursor JSON
-	err = json.Unmarshal(data, c.Progress)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal cursor JSON: %w", err)
-	}
-
-	return nil
-}
 
 // NewConsumer creates a new consumer
 func NewConsumer(
 	ctx context.Context,
 	socketURL string,
-	progPath string,
+	dataDir string,
+	eventTTL time.Duration,
 	emit func(context.Context, Event) error,
 ) (*Consumer, error) {
+	dbPath := dataDir + "/jetstream.db"
+	db, err := pebble.Open(dbPath, &pebble.Options{})
+	if err != nil {
+		log.Fatalf("failed to open pebble db: %v", err)
+	}
+
 	c := Consumer{
 		SocketURL: socketURL,
 		Progress: &Progress{
 			LastSeq: -1,
-			path:    progPath,
 		},
-		Emit: emit,
+		EventTTL: eventTTL,
+		Emit:     emit,
+		DB:       db,
 	}
 
 	// Check to see if the cursor exists
-	err := c.ReadCursor(context.Background())
+	err = c.ReadCursor(ctx)
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("failed to read cursor from file: %+v", err)
-		}
-		slog.Warn("cursor not found on disk, starting from live")
+		slog.Warn("previous cursor not found, starting from live", "error", err)
 	}
 
 	return &c, nil
@@ -155,6 +94,12 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 			EventType: EventIdentity,
 			Identity:  xe.RepoIdentity,
 		}
+		err = c.PersistEvent(ctx, &e)
+		if err != nil {
+			slog.Error("failed to persist event", "error", err)
+			return nil
+		}
+
 		err = c.Emit(ctx, e)
 		if err != nil {
 			slog.Error("failed to emit json", "error", err)
@@ -181,6 +126,12 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 			EventType: EventAccount,
 			Account:   xe.RepoAccount,
 		}
+		err = c.PersistEvent(ctx, &e)
+		if err != nil {
+			slog.Error("failed to persist event", "error", err)
+			return nil
+		}
+
 		err = c.Emit(ctx, e)
 		if err != nil {
 			slog.Error("failed to emit json", "error", err)
@@ -284,12 +235,6 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				RKey:       rkey,
 				Record:     rec,
 			}
-
-			err = c.Emit(ctx, e)
-			if err != nil {
-				log.Error("failed to emit event", "error", err)
-				break
-			}
 		case repomgr.EvtKindUpdateRecord:
 			if op.Cid == nil {
 				log.Error("update record op missing cid")
@@ -319,12 +264,6 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				RKey:       rkey,
 				Record:     rec,
 			}
-
-			err = c.Emit(ctx, e)
-			if err != nil {
-				log.Error("failed to emit event", "error", err)
-				break
-			}
 		case repomgr.EvtKindDeleteRecord:
 			// Emit the delete
 			e.Commit = &Commit{
@@ -333,14 +272,20 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				Collection: collection,
 				RKey:       rkey,
 			}
-
-			err = c.Emit(ctx, e)
-			if err != nil {
-				log.Error("failed to emit event", "error", err)
-				break
-			}
 		default:
 			log.Warn("unknown event kind from op action", "kind", op.Action)
+			continue
+		}
+
+		err = c.PersistEvent(ctx, &e)
+		if err != nil {
+			slog.Error("failed to persist event", "error", err)
+			return nil
+		}
+		err = c.Emit(ctx, e)
+		if err != nil {
+			log.Error("failed to emit event", "error", err)
+			break
 		}
 	}
 

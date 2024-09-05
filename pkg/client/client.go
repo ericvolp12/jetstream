@@ -12,11 +12,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const (
-	FormatJSON = "json"
-	FormatCBOR = "cbor"
-)
-
 type ClientConfig struct {
 	WebsocketURL      string
 	WantedDids        []string
@@ -63,13 +58,17 @@ func NewClient(config *ClientConfig) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) ConnectAndRead(ctx context.Context) error {
+func (c *Client) ConnectAndRead(ctx context.Context, cursor *int64) error {
 	header := http.Header{}
 	for k, v := range c.config.ExtraHeaders {
 		header.Add(k, v)
 	}
 
-	fullURL := fmt.Sprintf("%s?format=%s&compress=false", c.config.WebsocketURL, FormatJSON)
+	fullURL := c.config.WebsocketURL
+	if cursor != nil {
+		fullURL += fmt.Sprintf("?cursor=%d", *cursor)
+	}
+
 	for _, did := range c.config.WantedDids {
 		fullURL += fmt.Sprintf("&wantedDids=%s", did)
 	}

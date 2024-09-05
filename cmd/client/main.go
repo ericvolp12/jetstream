@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"time"
 
 	"github.com/ericvolp12/jetstream/pkg/client"
 	"github.com/ericvolp12/jetstream/pkg/consumer"
@@ -23,11 +24,13 @@ func main() {
 		log.Fatalf("failed to create client: %v", err)
 	}
 
+	cursor := time.Now().Add(-time.Hour).UnixMicro()
+
 	c.Handler = &handler{}
 
 	ctx := context.Background()
 
-	if err := c.ConnectAndRead(ctx); err != nil {
+	if err := c.ConnectAndRead(ctx, &cursor); err != nil {
 		log.Fatalf("failed to connect: %v", err)
 	}
 
@@ -37,6 +40,6 @@ func main() {
 type handler struct{}
 
 func (h *handler) OnEvent(ctx context.Context, event *consumer.Event) error {
-	fmt.Printf("received event: %#v\n", event)
+	fmt.Printf("evt: did=%s, typ=%s, time_us=%d, commit=%#v, account=%#v, identity=%#v\n", event.Did, event.EventType, event.TimeUS, event.Commit, event.Account, event.Identity)
 	return nil
 }

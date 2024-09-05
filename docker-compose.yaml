@@ -10,7 +10,7 @@ services:
     image: jetstream
     container_name: jetstream
     environment:
-      - CURSOR_FILE=/data/cursor.json
+      - JETSTREAM_DATA_DIR=/data
     ports:
       - "6008:6008"
     volumes:

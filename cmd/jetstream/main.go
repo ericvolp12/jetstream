@@ -37,31 +37,37 @@ func main() {
 			Name:    "ws-url",
 			Usage:   "full websocket path to the ATProto SubscribeRepos XRPC endpoint",
 			Value:   "wss://bsky.network/xrpc/com.atproto.sync.subscribeRepos",
-			EnvVars: []string{"WS_URL"},
+			EnvVars: []string{"JETSTREAM_WS_URL"},
 		},
 		&cli.IntFlag{
 			Name:    "worker-count",
 			Usage:   "number of workers to process events",
 			Value:   10,
-			EnvVars: []string{"WORKER_COUNT"},
+			EnvVars: []string{"JETSTREAM_WORKER_COUNT"},
 		},
 		&cli.IntFlag{
 			Name:    "max-queue-size",
 			Usage:   "max number of events to queue",
 			Value:   10,
-			EnvVars: []string{"MAX_QUEUE_SIZE"},
+			EnvVars: []string{"JETSTREAM_MAX_QUEUE_SIZE"},
 		},
 		&cli.StringFlag{
 			Name:    "listen-addr",
 			Usage:   "addr to serve echo on",
 			Value:   ":6008",
-			EnvVars: []string{"LISTEN_ADDR"},
+			EnvVars: []string{"JETSTREAM_LISTEN_ADDR"},
 		},
 		&cli.StringFlag{
-			Name:    "cursor-file",
-			Usage:   "path to the cursor file",
-			Value:   "./cursor.json",
-			EnvVars: []string{"CURSOR_FILE"},
+			Name:    "data-dir",
+			Usage:   "directory to store data (pebbleDB)",
+			Value:   "./data",
+			EnvVars: []string{"JETSTREAM_DATA_DIR"},
+		},
+		&cli.DurationFlag{
+			Name:    "event-ttl",
+			Usage:   "time to live for events",
+			Value:   72 * time.Hour,
+			EnvVars: []string{"JETSTREAM_EVENT_TTL"},
 		},
 	}
 
@@ -111,12 +117,15 @@ func Jetstream(cctx *cli.Context) error {
 	c, err := consumer.NewConsumer(
 		ctx,
 		u.String(),
-		cctx.String("cursor-file"),
+		cctx.String("data-dir"),
+		cctx.Duration("event-ttl"),
 		s.Emit,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create consumer: %w", err)
 	}
+
+	s.Consumer = c
 
 	scheduler := parallel.NewScheduler(100, 1_000, "prod-firehose", c.HandleStreamEvent)
 
@@ -172,7 +181,12 @@ func Jetstream(cctx *cli.Context) error {
 					log.Error("no new events in last 15 seconds, shutting down for docker to restart me", "seq", seq)
 					close(livenessKill)
 				} else {
-					log.Info("successful liveness check", "seq", seq)
+					// Trim the database
+					err := c.TrimEvents(ctx)
+					if err != nil {
+						log.Error("failed to trim events", "error", err)
+					}
+					log.Info("successful liveness check and trim", "seq", seq)
 					lastSeq = seq
 				}
 			}
@@ -216,7 +230,7 @@ func Jetstream(cctx *cli.Context) error {
 		u.RawQuery = fmt.Sprintf("cursor=%d", c.Progress.LastSeq)
 	}
 
-	log.Info(fmt.Sprintf("connecting to WebSocket at: %s", u.String()))
+	log.Info("connecting to websocket", "url", u.String())
 	con, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
 		log.Error("failed to connect to websocket", "error", err)
@@ -267,6 +281,8 @@ func Jetstream(cctx *cli.Context) error {
 	close(shutdownLivenessChecker)
 	close(shutdownCursorManager)
 	close(shutdownEcho)
+
+	c.DB.Close()
 
 	<-repoStreamShutdown
 	<-livenessCheckerShutdown
