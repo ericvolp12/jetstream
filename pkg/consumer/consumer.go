@@ -3,7 +3,6 @@ package consumer
 import (
 	"bytes"
 	"context"
-	"encoding/gob"
 	"fmt"
 	"log"
 	"log/slog"
@@ -55,12 +54,6 @@ func NewConsumer(
 		Emit:     emit,
 		DB:       db,
 	}
-
-	// Register Gob types
-	gob.Register(&Commit{})
-	gob.Register(&Event{})
-	gob.Register(&comatproto.SyncSubscribeRepos_Identity{})
-	gob.Register(&comatproto.SyncSubscribeRepos_Account{})
 
 	// Check to see if the cursor exists
 	err = c.ReadCursor(ctx)

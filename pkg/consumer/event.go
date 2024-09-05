@@ -5,20 +5,20 @@ import (
 )
 
 type Event struct {
-	Did       string                                  `json:"did"`
-	TimeUS    int64                                   `json:"time_us"`
-	EventType string                                  `json:"type"`
-	Commit    *Commit                                 `json:"commit,omitempty"`
-	Account   *comatproto.SyncSubscribeRepos_Account  `json:"account,omitempty"`
-	Identity  *comatproto.SyncSubscribeRepos_Identity `json:"identity,omitempty"`
+	Did       string                                  `json:"did" cborgen:"did"`
+	TimeUS    int64                                   `json:"time_us" cborgen:"time_us"`
+	EventType string                                  `json:"type" cborgen:"type"`
+	Commit    *Commit                                 `json:"commit,omitempty" cborgen:"commit,omitempty"`
+	Account   *comatproto.SyncSubscribeRepos_Account  `json:"account,omitempty" cborgen:"account,omitempty"`
+	Identity  *comatproto.SyncSubscribeRepos_Identity `json:"identity,omitempty" cborgen:"identity,omitempty"`
 }
 
 type Commit struct {
-	Rev        string `json:"rev,omitempty"`
-	OpType     string `json:"type"`
-	Collection string `json:"collection,omitempty"`
-	RKey       string `json:"rkey,omitempty"`
-	Record     any    `json:"record,omitempty"`
+	Rev        string `json:"rev,omitempty" cborgen:"rev"`
+	OpType     string `json:"type" cborgen:"type"`
+	Collection string `json:"collection,omitempty" cborgen:"collection"`
+	RKey       string `json:"rkey,omitempty" cborgen:"rkey"`
+	Record     any    `json:"record,omitempty" cborgen:"record,omitempty"`
 }
 
 var (
