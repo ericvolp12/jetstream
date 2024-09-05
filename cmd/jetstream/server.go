@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/ericvolp12/jetstream/pkg/consumer"
+	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus"
@@ -263,15 +263,8 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		log.Info("replaying events", "cursor", *cursor)
 		playbackRateLimit := s.maxSubRate * 10
 		go func() {
-			err := s.Consumer.ReplayEvents(ctx, *cursor, playbackRateLimit, func(ctx context.Context, e consumer.Event) error {
-				asJSON := &bytes.Buffer{}
-				err := json.NewEncoder(asJSON).Encode(e)
-				if err != nil {
-					return fmt.Errorf("failed to encode event as json: %w", err)
-				}
-				b := asJSON.Bytes()
-
-				evtSize := float64(len(b))
+			err := s.Consumer.ReplayEvents(ctx, *cursor, playbackRateLimit, func(ctx context.Context, e consumer.Event, b *[]byte) error {
+				evtSize := float64(len(*b))
 				bytesEmitted.Add(evtSize)
 
 				isCommit := e.EventType == consumer.EventCommit && e.Commit != nil
@@ -279,7 +272,7 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 				ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 				defer cancel()
 
-				return emitToSubscriber(ctx, log, sub, &e, isCommit, &b, evtSize)
+				return emitToSubscriber(ctx, log, sub, &e, isCommit, b, evtSize)
 			})
 			if err != nil {
 				log.Error("failed to replay events", "error", err)

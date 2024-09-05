@@ -130,7 +130,7 @@ func (c *Consumer) TrimEvents(ctx context.Context) error {
 var finalKey = []byte("9700000000000000")
 
 // ReplayEvents replays events from PebbleDB
-func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateLimit float64, emit func(context.Context, Event) error) error {
+func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateLimit float64, emit func(context.Context, Event, *[]byte) error) error {
 	ctx, span := tracer.Start(ctx, "ReplayEvents")
 	defer span.End()
 
@@ -171,7 +171,7 @@ func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateL
 		}
 
 		// Emit the event
-		err = emit(ctx, evt)
+		err = emit(ctx, evt, &data)
 		if err != nil {
 			log.Error("failed to emit event", "error", err)
 			return fmt.Errorf("failed to emit event: %w", err)
