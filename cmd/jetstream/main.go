@@ -66,8 +66,14 @@ func main() {
 		&cli.DurationFlag{
 			Name:    "event-ttl",
 			Usage:   "time to live for events",
-			Value:   72 * time.Hour,
+			Value:   24 * time.Hour,
 			EnvVars: []string{"JETSTREAM_EVENT_TTL"},
+		},
+		&cli.Float64Flag{
+			Name:    "max-sub-rate",
+			Usage:   "max rate of events per second we can send to a subscriber",
+			Value:   5_000,
+			EnvVars: []string{"JETSTREAM_MAX_SUB_RATE"},
 		},
 	}
 
@@ -109,7 +115,7 @@ func Jetstream(cctx *cli.Context) error {
 		}()
 	}
 
-	s, err := NewServer()
+	s, err := NewServer(cctx.Float64("max-sub-rate"))
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
 	}

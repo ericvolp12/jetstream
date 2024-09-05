@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/time/rate"
 )
 
 var (
@@ -34,6 +35,7 @@ type Subscriber struct {
 	bytesCounter      prometheus.Counter
 	wantedCollections []string
 	wantedDids        []string
+	rl                *rate.Limiter
 }
 
 type Server struct {
@@ -41,11 +43,13 @@ type Server struct {
 	lk          sync.RWMutex
 	nextSub     int64
 	Consumer    *consumer.Consumer
+	maxSubRate  float64
 }
 
-func NewServer() (*Server, error) {
+func NewServer(maxSubRate float64) (*Server, error) {
 	s := Server{
 		Subscribers: make(map[int64]*Subscriber),
+		maxSubRate:  maxSubRate,
 	}
 
 	return &s, nil
@@ -143,6 +147,7 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, realIP string, wantedCollecti
 		cursor:            cursor,
 		deliveredCounter:  eventsDelivered.WithLabelValues(realIP),
 		bytesCounter:      bytesDelivered.WithLabelValues(realIP),
+		rl:                rate.NewLimiter(rate.Limit(s.maxSubRate), 1),
 	}
 
 	s.Subscribers[s.nextSub] = &sub
@@ -274,6 +279,11 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 			log.Info("shutting down subscriber")
 			return nil
 		case msg := <-sub.buf:
+			err := sub.rl.Wait(ctx)
+			if err != nil {
+				log.Error("failed to wait for rate limiter", "error", err)
+				return nil
+			}
 			if err := ws.WriteMessage(websocket.TextMessage, *msg); err != nil {
 				log.Error("failed to write message to websocket", "error", err)
 				return nil
