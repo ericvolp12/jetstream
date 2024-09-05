@@ -114,6 +114,11 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, e 
 		}
 	}
 
+	err := sub.rl.Wait(ctx)
+	if err != nil {
+		log.Error("failed to wait for rate limiter", "error", err)
+		return fmt.Errorf("failed to wait for rate limiter: %w", err)
+	}
 	select {
 	case <-ctx.Done():
 		log.Error("failed to send event to subscriber", "error", ctx.Err(), "subscriber", sub.id)
@@ -279,11 +284,6 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 			log.Info("shutting down subscriber")
 			return nil
 		case msg := <-sub.buf:
-			err := sub.rl.Wait(ctx)
-			if err != nil {
-				log.Error("failed to wait for rate limiter", "error", err)
-				return nil
-			}
 			if err := ws.WriteMessage(websocket.TextMessage, *msg); err != nil {
 				log.Error("failed to write message to websocket", "error", err)
 				return nil
