@@ -7,7 +7,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
-	"net/http/pprof"
+	_ "net/http/pprof"
 	"net/url"
 	"os"
 	"os/signal"
@@ -205,8 +205,8 @@ func Jetstream(cctx *cli.Context) error {
 		return c.String(http.StatusOK, "Hello, World!")
 	})
 	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
+	e.GET("/debug/pprof/*", echo.WrapHandler(http.DefaultServeMux))
 	e.GET("/subscribe", s.HandleSubscribe)
-	e.GET("/debug/pprof/*", echo.WrapHandler(http.HandlerFunc(pprof.Index)))
 
 	httpServer := &http.Server{
 		Addr:    cctx.String("listen-addr"),
