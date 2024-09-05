@@ -135,6 +135,7 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, e 
 		return ctx.Err()
 	case sub.buf <- b:
 		sub.seq++
+		sub.deliveredCounter.Inc()
 		sub.bytesCounter.Add(evtSize)
 	}
 
@@ -155,7 +156,7 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, realIP string, wantedCollecti
 		cursor:            cursor,
 		deliveredCounter:  eventsDelivered.WithLabelValues(realIP),
 		bytesCounter:      bytesDelivered.WithLabelValues(realIP),
-		rl:                rate.NewLimiter(rate.Limit(s.maxSubRate), 1),
+		rl:                rate.NewLimiter(rate.Limit(s.maxSubRate), 1000),
 	}
 
 	s.Subscribers[s.nextSub] = &sub
@@ -296,7 +297,6 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 				log.Error("failed to write message to websocket", "error", err)
 				return nil
 			}
-			sub.deliveredCounter.Inc()
 		}
 	}
 }
