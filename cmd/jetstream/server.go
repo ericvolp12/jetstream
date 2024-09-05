@@ -83,6 +83,8 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 		collection = e.Commit.Collection
 	}
 
+	getEncodedEvent := func() []byte { return b }
+
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	sem := semaphore.NewWeighted(int64(maxConcurrentEmits))
@@ -100,7 +102,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 			if sub.cursor != nil {
 				return
 			}
-			emitToSubscriber(ctx, log, sub, e.Did, collection, func() []byte { return b })
+			emitToSubscriber(ctx, log, sub, e.Did, collection, getEncodedEvent)
 		}(sub)
 	}
 
