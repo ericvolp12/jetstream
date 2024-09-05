@@ -78,7 +78,10 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	evtSize := float64(len(b))
 	bytesEmitted.Add(evtSize)
 
-	isCommit := e.EventType == consumer.EventCommit && e.Commit != nil
+	collection := ""
+	if e.EventType == consumer.EventCommit && e.Commit != nil {
+		collection = e.Commit.Collection
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -97,7 +100,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 			if sub.cursor != nil {
 				return
 			}
-			emitToSubscriber(ctx, log, sub, &e, isCommit, &b, evtSize)
+			emitToSubscriber(ctx, log, sub, e.Did, collection, &b, evtSize)
 		}(sub)
 	}
 
@@ -109,15 +112,15 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	return nil
 }
 
-func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, e *consumer.Event, isCommit bool, b *[]byte, evtSize float64) error {
-	if len(sub.wantedCollections) > 0 && isCommit {
-		if _, ok := sub.wantedCollections[e.Commit.Collection]; !ok {
+func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, did, collection string, b *[]byte, evtSize float64) error {
+	if len(sub.wantedCollections) > 0 && collection != "" {
+		if _, ok := sub.wantedCollections[collection]; !ok {
 			return nil
 		}
 	}
 
 	if len(sub.wantedDids) > 0 {
-		if _, ok := sub.wantedDids[e.Did]; !ok {
+		if _, ok := sub.wantedDids[did]; !ok {
 			return nil
 		}
 	}
@@ -263,16 +266,14 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		log.Info("replaying events", "cursor", *cursor)
 		playbackRateLimit := s.maxSubRate * 10
 		go func() {
-			err := s.Consumer.ReplayEvents(ctx, *cursor, playbackRateLimit, func(ctx context.Context, e consumer.Event, b *[]byte) error {
+			err := s.Consumer.ReplayEvents(ctx, *cursor, playbackRateLimit, func(ctx context.Context, did, collection string, b *[]byte) error {
 				evtSize := float64(len(*b))
 				bytesEmitted.Add(evtSize)
-
-				isCommit := e.EventType == consumer.EventCommit && e.Commit != nil
 
 				ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 				defer cancel()
 
-				return emitToSubscriber(ctx, log, sub, &e, isCommit, b, evtSize)
+				return emitToSubscriber(ctx, log, sub, did, collection, b, evtSize)
 			})
 			if err != nil {
 				log.Error("failed to replay events", "error", err)
