@@ -24,7 +24,7 @@ var (
 type Subscriber struct {
 	ws                *websocket.Conn
 	seq               int64
-	buf               chan []byte
+	buf               chan *[]byte
 	id                int64
 	deliveredCounter  prometheus.Counter
 	bytesCounter      prometheus.Counter
@@ -69,7 +69,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	isCommit := e.EventType == consumer.EventCommit
+	isCommit := e.EventType == consumer.EventCommit && e.Commit != nil
 
 	wg := sync.WaitGroup{}
 	for _, sub := range s.Subscribers {
@@ -77,7 +77,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 		go func(sub *Subscriber) {
 			defer wg.Done()
 			if len(sub.wantedCollections) > 0 && isCommit {
-				if !slices.Contains(sub.wantedCollections, e.Payload.(*consumer.Commit).Collection) {
+				if !slices.Contains(sub.wantedCollections, e.Commit.Collection) {
 					return
 				}
 			}
@@ -98,7 +98,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 					log.Error("failed to close subscriber connection", "error", err)
 				}
 				return
-			case sub.buf <- b:
+			case sub.buf <- &b:
 				sub.seq++
 				sub.deliveredCounter.Inc()
 				sub.bytesCounter.Add(float64(len(b)))
@@ -117,7 +117,7 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, wantedCollections []string, w
 
 	sub := Subscriber{
 		ws:                ws,
-		buf:               make(chan []byte, 100),
+		buf:               make(chan *[]byte, 100),
 		id:                s.nextSub,
 		wantedCollections: wantedCollections,
 		wantedDids:        wantedDids,
@@ -206,7 +206,7 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		case <-ctx.Done():
 			return nil
 		case msg := <-sub.buf:
-			if err := ws.WriteMessage(websocket.TextMessage, msg); err != nil {
+			if err := ws.WriteMessage(websocket.TextMessage, *msg); err != nil {
 				log.Error("failed to write message to websocket", "error", err)
 				return nil
 			}

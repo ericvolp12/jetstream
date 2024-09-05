@@ -148,12 +148,12 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 			return nil
 		}
 
-		// Emit handle update
+		// Emit identity update
 		e := Event{
 			Did:       xe.RepoIdentity.Did,
 			TimeUS:    now.UnixMicro(),
 			EventType: EventIdentity,
-			Payload:   xe.RepoIdentity,
+			Identity:  xe.RepoIdentity,
 		}
 		err = c.Emit(ctx, e)
 		if err != nil {
@@ -174,12 +174,12 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 			return nil
 		}
 
-		// Emit handle update
+		// Emit account update
 		e := Event{
 			Did:       xe.RepoAccount.Did,
 			TimeUS:    now.UnixMicro(),
 			EventType: EventAccount,
-			Payload:   xe.RepoAccount,
+			Account:   xe.RepoAccount,
 		}
 		err = c.Emit(ctx, e)
 		if err != nil {
@@ -277,7 +277,7 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				return fmt.Errorf("failed to unmarshal record: %w", err)
 			}
 
-			e.Payload = Commit{
+			e.Commit = &Commit{
 				Rev:        evt.Rev,
 				OpType:     CommitCreateRecord,
 				Collection: collection,
@@ -312,7 +312,7 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				return fmt.Errorf("failed to unmarshal record: %w", err)
 			}
 
-			e.Payload = Commit{
+			e.Commit = &Commit{
 				Rev:        evt.Rev,
 				OpType:     CommitUpdateRecord,
 				Collection: collection,
@@ -327,7 +327,7 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 			}
 		case repomgr.EvtKindDeleteRecord:
 			// Emit the delete
-			e.Payload = Commit{
+			e.Commit = &Commit{
 				Rev:        evt.Rev,
 				OpType:     CommitDeleteRecord,
 				Collection: collection,

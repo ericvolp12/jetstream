@@ -1,10 +1,16 @@
 package consumer
 
+import (
+	comatproto "github.com/bluesky-social/indigo/api/atproto"
+)
+
 type Event struct {
-	Did       string `json:"did"`
-	TimeUS    int64  `json:"time_us"`
-	EventType string `json:"type"`
-	Payload   any    `json:"payload"` // Commit, Account, Identity
+	Did       string                                  `json:"did"`
+	TimeUS    int64                                   `json:"time_us"`
+	EventType string                                  `json:"type"`
+	Commit    *Commit                                 `json:"commit,omitempty"`
+	Account   *comatproto.SyncSubscribeRepos_Account  `json:"account,omitempty"`
+	Identity  *comatproto.SyncSubscribeRepos_Identity `json:"identity,omitempty"`
 }
 
 type Commit struct {

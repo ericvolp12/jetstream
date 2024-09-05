@@ -41,7 +41,7 @@ ws://localhost:6008/subscribe?wantedCollections=app.bsky.feed.post&wantedCollect
   "did": "did:plc:stk5dhwhpcjxtlwnhbknmfgx",
   "time_us": 1725516666734038,
   "type": "com",
-  "payload": {
+  "commit": {
     "rev": "3l3f6nzhvkl2g",
     "type": "c",
     "collection": "app.bsky.feed.like",
@@ -65,7 +65,7 @@ ws://localhost:6008/subscribe?wantedCollections=app.bsky.feed.post&wantedCollect
   "did": "did:plc:rfov6bpyztcnedeyyzgfq42k",
   "time_us": 1725516666833633,
   "type": "com",
-  "payload": {
+  "commit": {
     "rev": "3l3f6nzl3cv2s",
     "type": "d",
     "collection": "app.bsky.graph.follow",
@@ -81,7 +81,7 @@ ws://localhost:6008/subscribe?wantedCollections=app.bsky.feed.post&wantedCollect
   "did": "did:plc:ufbl4k27gp6kzas5glhz7fim",
   "time_us": 1725516665234703,
   "type": "id",
-  "payload": {
+  "identity": {
     "did": "did:plc:ufbl4k27gp6kzas5glhz7fim",
     "handle": "yohenrique.bsky.social",
     "seq": 1409752997,
@@ -97,7 +97,7 @@ ws://localhost:6008/subscribe?wantedCollections=app.bsky.feed.post&wantedCollect
   "did": "did:plc:ufbl4k27gp6kzas5glhz7fim",
   "time_us": 1725516665333808,
   "type": "acc",
-  "payload": {
+  "account": {
     "active": true,
     "did": "did:plc:ufbl4k27gp6kzas5glhz7fim",
     "seq": 1409753013,
