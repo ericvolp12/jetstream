@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -34,8 +33,8 @@ type Subscriber struct {
 	cursor            *int64
 	deliveredCounter  prometheus.Counter
 	bytesCounter      prometheus.Counter
-	wantedCollections []string
-	wantedDids        []string
+	wantedCollections map[string]struct{}
+	wantedDids        map[string]struct{}
 	rl                *rate.Limiter
 }
 
@@ -112,13 +111,13 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 
 func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, e *consumer.Event, isCommit bool, b *[]byte, evtSize float64) error {
 	if len(sub.wantedCollections) > 0 && isCommit {
-		if !slices.Contains(sub.wantedCollections, e.Commit.Collection) {
+		if _, ok := sub.wantedCollections[e.Commit.Collection]; !ok {
 			return nil
 		}
 	}
 
 	if len(sub.wantedDids) > 0 {
-		if !slices.Contains(sub.wantedDids, e.Did) {
+		if _, ok := sub.wantedDids[e.Did]; !ok {
 			return nil
 		}
 	}
@@ -146,13 +145,23 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, realIP string, wantedCollecti
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
+	colMap := make(map[string]struct{})
+	for _, c := range wantedCollections {
+		colMap[c] = struct{}{}
+	}
+
+	didMap := make(map[string]struct{})
+	for _, d := range wantedDids {
+		didMap[d] = struct{}{}
+	}
+
 	sub := Subscriber{
 		ws:                ws,
 		realIP:            realIP,
 		buf:               make(chan *[]byte, 100),
 		id:                s.nextSub,
-		wantedCollections: wantedCollections,
-		wantedDids:        wantedDids,
+		wantedCollections: colMap,
+		wantedDids:        didMap,
 		cursor:            cursor,
 		deliveredCounter:  eventsDelivered.WithLabelValues(realIP),
 		bytesCounter:      bytesDelivered.WithLabelValues(realIP),
