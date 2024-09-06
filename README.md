@@ -31,10 +31,16 @@ The following Query Parameters are supported:
   - An absent cursor or a cursor from the future will result in live-tail operation
   - When reconnecting, use the `time_us` from your most recently processed event and maybe provide a negative buffer (i.e. subtract a few seconds) to ensure gapless playback
 
+A simple example that hits the public instance looks like:
+
+```bash
+$ websocat wss://jetstream.atproto.tools/subscribe\?wantedCollections=app.bsky.feed.post
+```
+
 A maximal example using all parameters looks like:
 
 ```bash
-$ websocat "wss://jetstream.atproto.tools/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like&wantedCollections=app.bsky.graph.follow&wantedDids=did:plc:q6gjnaw2blty4crticxkmujt&cursor=1725519626134432"
+$ websocat "ws://localhost:6008/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like&wantedCollections=app.bsky.graph.follow&wantedDids=did:plc:q6gjnaw2blty4crticxkmujt&cursor=1725519626134432"
 ```
 
 ### Example events:
