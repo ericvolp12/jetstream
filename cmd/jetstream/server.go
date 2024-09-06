@@ -85,8 +85,6 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 
 	getEncodedEvent := func() []byte { return b }
 
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
 	sem := semaphore.NewWeighted(int64(maxConcurrentEmits))
 	for _, sub := range s.Subscribers {
 		if err := sem.Acquire(ctx, 1); err != nil {
@@ -114,7 +112,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	return nil
 }
 
-func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, did, collection string, copyOnWrite bool, getEncodedEvent func() []byte) error {
+func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, did, collection string, playback bool, getEncodedEvent func() []byte) error {
 	if len(sub.wantedCollections) > 0 && collection != "" {
 		if _, ok := sub.wantedCollections[collection]; !ok {
 			return nil
@@ -128,24 +126,45 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, di
 	}
 
 	evtBytes := getEncodedEvent()
-	if copyOnWrite {
+	if playback {
+		// Copy the event bytes so the playback iterator can reuse the buffer
 		evtBytes = append([]byte{}, evtBytes...)
-	}
-
-	select {
-	case <-ctx.Done():
-		log.Error("failed to send event to subscriber", "error", ctx.Err(), "subscriber", sub.id)
-
-		// If we failed to send to a subscriber, close the connection
-		err := sub.ws.Close()
-		if err != nil {
-			log.Error("failed to close subscriber connection", "error", err)
+		select {
+		case <-ctx.Done():
+			log.Error("failed to send event to subscriber", "error", ctx.Err(), "subscriber", sub.id)
+			// If we failed to send to a subscriber, close the connection
+			err := sub.ws.Close()
+			if err != nil {
+				log.Error("failed to close subscriber connection", "error", err)
+			}
+			return ctx.Err()
+		case sub.buf <- &evtBytes:
+			sub.seq++
+			sub.deliveredCounter.Inc()
+			sub.bytesCounter.Add(float64(len(evtBytes)))
 		}
-		return ctx.Err()
-	case sub.buf <- &evtBytes:
-		sub.seq++
-		sub.deliveredCounter.Inc()
-		sub.bytesCounter.Add(float64(len(evtBytes)))
+	} else {
+		select {
+		case <-ctx.Done():
+			log.Error("failed to send event to subscriber", "error", ctx.Err(), "subscriber", sub.id)
+			// If we failed to send to a subscriber, close the connection
+			err := sub.ws.Close()
+			if err != nil {
+				log.Error("failed to close subscriber connection", "error", err)
+			}
+			return ctx.Err()
+		case sub.buf <- &evtBytes:
+			sub.seq++
+			sub.deliveredCounter.Inc()
+			sub.bytesCounter.Add(float64(len(evtBytes)))
+		default:
+			// Drop slow subscribers if they're live tailing and fall too far behind
+			log.Error("failed to send event to subscriber, dropping", "error", "buffer full", "subscriber", sub.id)
+			err := sub.ws.Close()
+			if err != nil {
+				log.Error("failed to close subscriber connection", "error", err)
+			}
+		}
 	}
 
 	return nil
@@ -175,7 +194,7 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, realIP string, wantedCollecti
 		cursor:            cursor,
 		deliveredCounter:  eventsDelivered.WithLabelValues(realIP),
 		bytesCounter:      bytesDelivered.WithLabelValues(realIP),
-		rl:                rate.NewLimiter(rate.Limit(s.maxSubRate), 1000),
+		rl:                rate.NewLimiter(rate.Limit(s.maxSubRate), int(s.maxSubRate)),
 	}
 
 	s.Subscribers[s.nextSub] = &sub
@@ -274,9 +293,6 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		playbackRateLimit := s.maxSubRate * 10
 		go func() {
 			err := s.Consumer.ReplayEvents(ctx, *cursor, playbackRateLimit, func(ctx context.Context, did, collection string, getEncodedEvent func() []byte) error {
-				ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-				defer cancel()
-
 				return emitToSubscriber(ctx, log, sub, did, collection, true, getEncodedEvent)
 			})
 			if err != nil {
