@@ -123,6 +123,7 @@ func Jetstream(cctx *cli.Context) error {
 
 	c, err := consumer.NewConsumer(
 		ctx,
+		log,
 		u.String(),
 		cctx.String("data-dir"),
 		cctx.Duration("event-ttl"),

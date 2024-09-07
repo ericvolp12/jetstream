@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"time"
 
 	"github.com/ericvolp12/jetstream/pkg/client"
 	"github.com/ericvolp12/jetstream/pkg/consumer"
@@ -26,13 +27,13 @@ func main() {
 		log.Fatalf("failed to create client: %v", err)
 	}
 
-	// cursor := time.Now().Add(-time.Hour).UnixMicro()
+	cursor := time.Now().Add(-time.Hour).UnixMicro()
 
 	c.Handler = &handler{}
 
 	ctx := context.Background()
 
-	if err := c.ConnectAndRead(ctx, nil); err != nil {
+	if err := c.ConnectAndRead(ctx, &cursor); err != nil {
 		log.Fatalf("failed to connect: %v", err)
 	}
 

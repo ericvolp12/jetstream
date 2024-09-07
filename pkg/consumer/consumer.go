@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"log/slog"
 	"strings"
 	"time"
@@ -27,6 +26,7 @@ type Consumer struct {
 	Emit      func(context.Context, Event) error
 	DB        *pebble.DB
 	EventTTL  time.Duration
+	logger    *slog.Logger
 }
 
 var tracer = otel.Tracer("consumer")
@@ -34,6 +34,7 @@ var tracer = otel.Tracer("consumer")
 // NewConsumer creates a new consumer
 func NewConsumer(
 	ctx context.Context,
+	logger *slog.Logger,
 	socketURL string,
 	dataDir string,
 	eventTTL time.Duration,
@@ -42,8 +43,10 @@ func NewConsumer(
 	dbPath := dataDir + "/jetstream.db"
 	db, err := pebble.Open(dbPath, &pebble.Options{})
 	if err != nil {
-		log.Fatalf("failed to open pebble db: %v", err)
+		return nil, fmt.Errorf("failed to open db: %w", err)
 	}
+
+	log := logger.With("component", "consumer")
 
 	c := Consumer{
 		SocketURL: socketURL,
@@ -53,12 +56,13 @@ func NewConsumer(
 		EventTTL: eventTTL,
 		Emit:     emit,
 		DB:       db,
+		logger:   log,
 	}
 
 	// Check to see if the cursor exists
 	err = c.ReadCursor(ctx)
 	if err != nil {
-		slog.Warn("previous cursor not found, starting from live", "error", err)
+		log.Warn("previous cursor not found, starting from live", "error", err)
 	}
 
 	return &c, nil
@@ -72,7 +76,7 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 	case xe.RepoCommit != nil:
 		eventsProcessedCounter.WithLabelValues("commit", c.SocketURL).Inc()
 		if xe.RepoCommit.TooBig {
-			slog.Warn("repo commit too big", "repo", xe.RepoCommit.Repo, "seq", xe.RepoCommit.Seq, "rev", xe.RepoCommit.Rev)
+			c.logger.Warn("repo commit too big", "repo", xe.RepoCommit.Repo, "seq", xe.RepoCommit.Seq, "rev", xe.RepoCommit.Rev)
 			return nil
 		}
 		return c.HandleRepoCommit(ctx, xe.RepoCommit)
@@ -83,7 +87,7 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 		// Parse time from the event time string
 		t, err := time.Parse(time.RFC3339, xe.RepoIdentity.Time)
 		if err != nil {
-			slog.Error("error parsing time", "error", err)
+			c.logger.Error("error parsing time", "error", err)
 			return nil
 		}
 
@@ -96,13 +100,13 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 		}
 		err = c.PersistEvent(ctx, &e)
 		if err != nil {
-			slog.Error("failed to persist event", "error", err)
+			c.logger.Error("failed to persist event", "error", err)
 			return nil
 		}
 
 		err = c.Emit(ctx, e)
 		if err != nil {
-			slog.Error("failed to emit json", "error", err)
+			c.logger.Error("failed to emit json", "error", err)
 		}
 		lastEvtCreatedAtGauge.WithLabelValues(c.SocketURL).Set(float64(t.UnixNano()))
 		lastEvtProcessedAtGauge.WithLabelValues(c.SocketURL).Set(float64(now.UnixNano()))
@@ -115,7 +119,7 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 		// Parse time from the event time string
 		t, err := time.Parse(time.RFC3339, xe.RepoAccount.Time)
 		if err != nil {
-			slog.Error("error parsing time", "error", err)
+			c.logger.Error("error parsing time", "error", err)
 			return nil
 		}
 
@@ -128,13 +132,13 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 		}
 		err = c.PersistEvent(ctx, &e)
 		if err != nil {
-			slog.Error("failed to persist event", "error", err)
+			c.logger.Error("failed to persist event", "error", err)
 			return nil
 		}
 
 		err = c.Emit(ctx, e)
 		if err != nil {
-			slog.Error("failed to emit json", "error", err)
+			c.logger.Error("failed to emit json", "error", err)
 		}
 		lastEvtCreatedAtGauge.WithLabelValues(c.SocketURL).Set(float64(t.UnixNano()))
 		lastEvtProcessedAtGauge.WithLabelValues(c.SocketURL).Set(float64(now.UnixNano()))
@@ -158,7 +162,7 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 
 	lastSeqGauge.WithLabelValues(c.SocketURL).Set(float64(evt.Seq))
 
-	log := slog.With("repo", evt.Repo, "seq", evt.Seq, "commit", evt.Commit.String())
+	log := c.logger.With("repo", evt.Repo, "seq", evt.Seq, "commit", evt.Commit.String())
 
 	span.AddEvent("Read Repo From Car")
 	rr, err := repo.ReadRepoFromCar(ctx, bytes.NewReader(evt.Blocks))

@@ -55,7 +55,7 @@ func NewServer(maxSubRate float64) (*Server, error) {
 	return &s, nil
 }
 
-var maxConcurrentEmits = 100
+var maxConcurrentEmits = int64(100)
 
 func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	ctx, span := tracer.Start(ctx, "Emit")
@@ -85,7 +85,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 
 	getEncodedEvent := func() []byte { return b }
 
-	sem := semaphore.NewWeighted(int64(maxConcurrentEmits))
+	sem := semaphore.NewWeighted(maxConcurrentEmits)
 	for _, sub := range s.Subscribers {
 		if err := sem.Acquire(ctx, 1); err != nil {
 			log.Error("failed to acquire semaphore", "error", err)
@@ -104,7 +104,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 		}(sub)
 	}
 
-	if err := sem.Acquire(ctx, int64(maxConcurrentEmits)); err != nil {
+	if err := sem.Acquire(ctx, maxConcurrentEmits); err != nil {
 		log.Error("failed to acquire semaphore", "error", err)
 		return fmt.Errorf("failed to acquire semaphore: %w", err)
 	}
@@ -154,6 +154,7 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, di
 			}
 			return ctx.Err()
 		case sub.buf <- &evtBytes:
+			log.Info("sent event to subscriber", "subscriber", sub.id, "event", string(evtBytes))
 			sub.seq++
 			sub.deliveredCounter.Inc()
 			sub.bytesCounter.Add(float64(len(evtBytes)))
