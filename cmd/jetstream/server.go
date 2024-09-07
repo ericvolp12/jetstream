@@ -155,7 +155,6 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, di
 			}
 			return ctx.Err()
 		case sub.buf <- &evtBytes:
-			log.Info("sent event to subscriber", "subscriber", sub.id, "event", string(evtBytes))
 			sub.seq++
 			sub.deliveredCounter.Inc()
 			sub.bytesCounter.Add(float64(len(evtBytes)))
