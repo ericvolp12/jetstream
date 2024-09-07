@@ -3,6 +3,7 @@ package consumer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -232,12 +233,18 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				return fmt.Errorf("failed to unmarshal record: %w", err)
 			}
 
+			recJSON, err := json.Marshal(rec)
+			if err != nil {
+				log.Error("failed to marshal record to json", "error", err)
+				break
+			}
+
 			e.Commit = &Commit{
 				Rev:        evt.Rev,
 				OpType:     CommitCreateRecord,
 				Collection: collection,
 				RKey:       rkey,
-				Record:     rec,
+				Record:     recJSON,
 			}
 		case repomgr.EvtKindUpdateRecord:
 			if op.Cid == nil {
@@ -261,12 +268,18 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				return fmt.Errorf("failed to unmarshal record: %w", err)
 			}
 
+			recJSON, err := json.Marshal(rec)
+			if err != nil {
+				log.Error("failed to marshal record to json", "error", err)
+				break
+			}
+
 			e.Commit = &Commit{
 				Rev:        evt.Rev,
 				OpType:     CommitUpdateRecord,
 				Collection: collection,
 				RKey:       rkey,
-				Record:     rec,
+				Record:     recJSON,
 			}
 		case repomgr.EvtKindDeleteRecord:
 			// Emit the delete

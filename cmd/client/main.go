@@ -2,21 +2,20 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
 	"time"
 
+	apibsky "github.com/bluesky-social/indigo/api/bsky"
 	"github.com/ericvolp12/jetstream/pkg/client"
 	"github.com/ericvolp12/jetstream/pkg/consumer"
-	"golang.org/x/time/rate"
 )
 
 const (
 	serverAddr = "ws://localhost:6008/subscribe"
 )
-
-var limiter = rate.NewLimiter(rate.Limit(4), 1)
 
 func main() {
 	config := client.DefaultClientConfig()
@@ -43,7 +42,17 @@ func main() {
 type handler struct{}
 
 func (h *handler) OnEvent(ctx context.Context, event *consumer.Event) error {
-	limiter.Wait(ctx)
-	fmt.Printf("evt: did=%s, typ=%s, time_us=%d, commit=%#v, account=%#v, identity=%#v\n", event.Did, event.EventType, event.TimeUS, event.Commit, event.Account, event.Identity)
+	// Unmarshal the record if there is one
+	if event.Commit != nil && (event.Commit.OpType == consumer.CommitCreateRecord || event.Commit.OpType == consumer.CommitUpdateRecord) {
+		switch event.Commit.Collection {
+		case "app.bsky.feed.post":
+			var post apibsky.FeedPost
+			if err := json.Unmarshal(event.Commit.Record, &post); err != nil {
+				return fmt.Errorf("failed to unmarshal post: %w", err)
+			}
+			fmt.Printf("(%s)| %s\n", event.Did, post.Text)
+		}
+	}
+
 	return nil
 }

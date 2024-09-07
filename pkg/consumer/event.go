@@ -1,6 +1,8 @@
 package consumer
 
 import (
+	"github.com/goccy/go-json"
+
 	comatproto "github.com/bluesky-social/indigo/api/atproto"
 )
 
@@ -14,11 +16,11 @@ type Event struct {
 }
 
 type Commit struct {
-	Rev        string `json:"rev,omitempty" cborgen:"rev"`
-	OpType     string `json:"type" cborgen:"type"`
-	Collection string `json:"collection,omitempty" cborgen:"collection"`
-	RKey       string `json:"rkey,omitempty" cborgen:"rkey"`
-	Record     any    `json:"record,omitempty" cborgen:"record,omitempty"`
+	Rev        string          `json:"rev,omitempty" cborgen:"rev"`
+	OpType     string          `json:"type" cborgen:"type"`
+	Collection string          `json:"collection,omitempty" cborgen:"collection"`
+	RKey       string          `json:"rkey,omitempty" cborgen:"rkey"`
+	Record     json.RawMessage `json:"record,omitempty" cborgen:"record,omitempty"`
 }
 
 var (
