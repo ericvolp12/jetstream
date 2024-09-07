@@ -10,7 +10,7 @@ import (
 
 	apibsky "github.com/bluesky-social/indigo/api/bsky"
 	"github.com/ericvolp12/jetstream/pkg/client"
-	"github.com/ericvolp12/jetstream/pkg/consumer"
+	"github.com/ericvolp12/jetstream/pkg/models"
 )
 
 const (
@@ -41,9 +41,9 @@ func main() {
 
 type handler struct{}
 
-func (h *handler) OnEvent(ctx context.Context, event *consumer.Event) error {
+func (h *handler) OnEvent(ctx context.Context, event *models.Event) error {
 	// Unmarshal the record if there is one
-	if event.Commit != nil && (event.Commit.OpType == consumer.CommitCreateRecord || event.Commit.OpType == consumer.CommitUpdateRecord) {
+	if event.Commit != nil && (event.Commit.OpType == models.CommitCreateRecord || event.Commit.OpType == models.CommitUpdateRecord) {
 		switch event.Commit.Collection {
 		case "app.bsky.feed.post":
 			var post apibsky.FeedPost

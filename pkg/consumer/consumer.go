@@ -11,6 +11,7 @@ import (
 
 	comatproto "github.com/bluesky-social/indigo/api/atproto"
 	"github.com/bluesky-social/indigo/atproto/data"
+	"github.com/ericvolp12/jetstream/pkg/models"
 
 	"github.com/bluesky-social/indigo/events"
 	"github.com/bluesky-social/indigo/repo"
@@ -24,7 +25,7 @@ import (
 type Consumer struct {
 	SocketURL string
 	Progress  *Progress
-	Emit      func(context.Context, Event) error
+	Emit      func(context.Context, models.Event) error
 	DB        *pebble.DB
 	EventTTL  time.Duration
 	logger    *slog.Logger
@@ -39,7 +40,7 @@ func NewConsumer(
 	socketURL string,
 	dataDir string,
 	eventTTL time.Duration,
-	emit func(context.Context, Event) error,
+	emit func(context.Context, models.Event) error,
 ) (*Consumer, error) {
 	dbPath := dataDir + "/jetstream.db"
 	db, err := pebble.Open(dbPath, &pebble.Options{})
@@ -93,10 +94,10 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 		}
 
 		// Emit identity update
-		e := Event{
+		e := models.Event{
 			Did:       xe.RepoIdentity.Did,
 			TimeUS:    now.UnixMicro(),
-			EventType: EventIdentity,
+			EventType: models.EventIdentity,
 			Identity:  xe.RepoIdentity,
 		}
 		err = c.PersistEvent(ctx, &e)
@@ -125,10 +126,10 @@ func (c *Consumer) HandleStreamEvent(ctx context.Context, xe *events.XRPCStreamE
 		}
 
 		// Emit account update
-		e := Event{
+		e := models.Event{
 			Did:       xe.RepoAccount.Did,
 			TimeUS:    now.UnixMicro(),
-			EventType: EventAccount,
+			EventType: models.EventAccount,
 			Account:   xe.RepoAccount,
 		}
 		err = c.PersistEvent(ctx, &e)
@@ -204,10 +205,10 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 		span.SetAttributes(attribute.Int64("seq", evt.Seq))
 		span.SetAttributes(attribute.String("event_kind", op.Action))
 
-		e := Event{
+		e := models.Event{
 			Did:       evt.Repo,
 			TimeUS:    time.Now().UnixMicro(),
-			EventType: EventCommit,
+			EventType: models.EventCommit,
 		}
 
 		switch ek {
@@ -239,9 +240,9 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				break
 			}
 
-			e.Commit = &Commit{
+			e.Commit = &models.Commit{
 				Rev:        evt.Rev,
-				OpType:     CommitCreateRecord,
+				OpType:     models.CommitCreateRecord,
 				Collection: collection,
 				RKey:       rkey,
 				Record:     recJSON,
@@ -274,18 +275,18 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				break
 			}
 
-			e.Commit = &Commit{
+			e.Commit = &models.Commit{
 				Rev:        evt.Rev,
-				OpType:     CommitUpdateRecord,
+				OpType:     models.CommitUpdateRecord,
 				Collection: collection,
 				RKey:       rkey,
 				Record:     recJSON,
 			}
 		case repomgr.EvtKindDeleteRecord:
 			// Emit the delete
-			e.Commit = &Commit{
+			e.Commit = &models.Commit{
 				Rev:        evt.Rev,
-				OpType:     CommitDeleteRecord,
+				OpType:     models.CommitDeleteRecord,
 				Collection: collection,
 				RKey:       rkey,
 			}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/pebble"
+	"github.com/ericvolp12/jetstream/pkg/models"
 	"github.com/goccy/go-json"
 	"github.com/labstack/gommon/log"
 	"golang.org/x/time/rate"
@@ -85,7 +86,7 @@ func (c *Consumer) ReadCursor(ctx context.Context) error {
 }
 
 // PersistEvent persists an event to PebbleDB
-func (c *Consumer) PersistEvent(ctx context.Context, evt *Event) error {
+func (c *Consumer) PersistEvent(ctx context.Context, evt *models.Event) error {
 	ctx, span := tracer.Start(ctx, "PersistEvent")
 	defer span.End()
 
@@ -99,7 +100,7 @@ func (c *Consumer) PersistEvent(ctx context.Context, evt *Event) error {
 	// Key structure for events in PebbleDB
 	// {{event_time_us}}_{{repo}}_{{collection}}
 	var key []byte
-	if evt.EventType == EventCommit && evt.Commit != nil {
+	if evt.EventType == models.EventCommit && evt.Commit != nil {
 		key = []byte(fmt.Sprintf("%d_%s_%s", evt.TimeUS, evt.Did, evt.Commit.Collection))
 	} else {
 		key = []byte(fmt.Sprintf("%d_%s", evt.TimeUS, evt.Did))

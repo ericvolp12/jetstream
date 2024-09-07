@@ -1,4 +1,4 @@
-package consumer
+package models
 
 import (
 	"github.com/goccy/go-json"

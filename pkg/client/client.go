@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/ericvolp12/jetstream/pkg/consumer"
+	"github.com/ericvolp12/jetstream/pkg/models"
 	"github.com/gorilla/websocket"
 )
 
@@ -20,7 +20,7 @@ type ClientConfig struct {
 }
 
 type Handler interface {
-	OnEvent(ctx context.Context, event *consumer.Event) error
+	OnEvent(ctx context.Context, event *models.Event) error
 }
 
 type Client struct {
@@ -119,7 +119,7 @@ func (c *Client) readLoop(ctx context.Context) error {
 			}
 
 			// Unpack the message and pass it to the handler
-			var event consumer.Event
+			var event models.Event
 			if err := json.Unmarshal(msg, &event); err != nil {
 				c.logger.Error("failed to unmarshal event", "error", err)
 				return fmt.Errorf("failed to unmarshal event: %w", err)

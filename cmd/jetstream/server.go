@@ -11,6 +11,7 @@ import (
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/ericvolp12/jetstream/pkg/consumer"
+	"github.com/ericvolp12/jetstream/pkg/models"
 	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
@@ -57,7 +58,7 @@ func NewServer(maxSubRate float64) (*Server, error) {
 
 var maxConcurrentEmits = int64(100)
 
-func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
+func (s *Server) Emit(ctx context.Context, e models.Event) error {
 	ctx, span := tracer.Start(ctx, "Emit")
 	defer span.End()
 
@@ -79,7 +80,7 @@ func (s *Server) Emit(ctx context.Context, e consumer.Event) error {
 	bytesEmitted.Add(evtSize)
 
 	collection := ""
-	if e.EventType == consumer.EventCommit && e.Commit != nil {
+	if e.EventType == models.EventCommit && e.Commit != nil {
 		collection = e.Commit.Collection
 	}
 
