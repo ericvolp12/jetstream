@@ -65,16 +65,24 @@ func (c *Client) ConnectAndRead(ctx context.Context, cursor *int64) error {
 	}
 
 	fullURL := c.config.WebsocketURL
+	params := []string{}
 	if cursor != nil {
-		fullURL += fmt.Sprintf("?cursor=%d", *cursor)
+		params = append(params, fmt.Sprintf("cursor=%d", *cursor))
 	}
 
 	for _, did := range c.config.WantedDids {
-		fullURL += fmt.Sprintf("&wantedDids=%s", did)
+		params = append(params, fmt.Sprintf("wantedDids=%s", did))
 	}
 
 	for _, collection := range c.config.WantedCollections {
-		fullURL += fmt.Sprintf("&wantedCollections=%s", collection)
+		params = append(params, fmt.Sprintf("wantedCollections=%s", collection))
+	}
+
+	if len(params) > 0 {
+		fullURL += "?" + url.QueryEscape(params[0])
+		for _, p := range params[1:] {
+			fullURL += "&" + url.QueryEscape(p)
+		}
 	}
 
 	u, err := url.Parse(fullURL)
