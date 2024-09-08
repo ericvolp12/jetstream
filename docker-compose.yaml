@@ -11,7 +11,6 @@ services:
     container_name: jetstream
     environment:
       - JETSTREAM_DATA_DIR=/data
-    ports:
     network_mode: host
     volumes:
       - ./data:/data
