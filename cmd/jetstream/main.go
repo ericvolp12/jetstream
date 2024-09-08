@@ -82,6 +82,12 @@ func main() {
 			Value:   5_000,
 			EnvVars: []string{"JETSTREAM_MAX_SUB_RATE"},
 		},
+		&cli.Int64Flag{
+			Name:    "override-relay-cursor",
+			Usage:   "override cursor to start from, if not set will start from the last cursor in the database, if no cursor in the database will start from live",
+			Value:   -1,
+			EnvVars: []string{"JETSTREAM_OVERRIDE_RELAY_CURSOR"},
+		},
 	}
 
 	app.Action = Jetstream
@@ -271,7 +277,21 @@ func Jetstream(cctx *cli.Context) error {
 		close(metricsShutdown)
 	}()
 
+	var cursor *int64
+	cursorOverride := cctx.Int64("override-relay-cursor")
+
+	// If the last cursor in the database is set, use that as the cursor
 	if c.Progress.LastSeq >= 0 {
+		cursor = &c.Progress.LastSeq
+	}
+
+	// If the override cursor is set, use that instead of the last cursor in the database
+	if cursorOverride >= 0 {
+		cursor = &cursorOverride
+	}
+
+	// If the cursor is nil, we are starting from live
+	if cursor != nil {
 		u.RawQuery = fmt.Sprintf("cursor=%d", c.Progress.LastSeq)
 	}
 
