@@ -3,7 +3,6 @@ package consumer
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,12 +10,12 @@ import (
 
 	comatproto "github.com/bluesky-social/indigo/api/atproto"
 	"github.com/bluesky-social/indigo/atproto/data"
-	"github.com/ericvolp12/jetstream/pkg/models"
-
 	"github.com/bluesky-social/indigo/events"
 	"github.com/bluesky-social/indigo/repo"
 	"github.com/bluesky-social/indigo/repomgr"
 	"github.com/cockroachdb/pebble"
+	"github.com/ericvolp12/jetstream/pkg/models"
+	"github.com/goccy/go-json"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 )

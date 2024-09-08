@@ -2,13 +2,13 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 
 	"github.com/ericvolp12/jetstream/pkg/models"
+	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
 )
 

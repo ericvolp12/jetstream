@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
@@ -11,15 +10,17 @@ import (
 	apibsky "github.com/bluesky-social/indigo/api/bsky"
 	"github.com/ericvolp12/jetstream/pkg/client"
 	"github.com/ericvolp12/jetstream/pkg/models"
+	"github.com/goccy/go-json"
 )
 
 const (
-	serverAddr = "ws://localhost:6008/subscribe"
+	serverAddr = "wss://jetstream.atproto.tools/subscribe"
 )
 
 func main() {
 	config := client.DefaultClientConfig()
 	config.WebsocketURL = serverAddr
+	config.WantedCollections = []string{"app.bsky.feed.post"}
 
 	c, err := client.NewClient(config)
 	if err != nil {
@@ -32,7 +33,7 @@ func main() {
 
 	ctx := context.Background()
 
-	if err := c.ConnectAndRead(ctx, &cursor); err != nil {
+	if err := c.ConnectAndRead(ctx, cursor); err != nil {
 		log.Fatalf("failed to connect: %v", err)
 	}
 

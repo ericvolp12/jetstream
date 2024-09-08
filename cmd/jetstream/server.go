@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -69,12 +68,11 @@ func (s *Server) Emit(ctx context.Context, e models.Event) error {
 
 	eventsEmitted.Inc()
 
-	asJSON := &bytes.Buffer{}
-	err := json.NewEncoder(asJSON).Encode(e)
+	b, err := json.Marshal(e)
 	if err != nil {
-		return fmt.Errorf("failed to encode event as json: %w", err)
+		log.Error("failed to marshal event", "error", err)
+		return fmt.Errorf("failed to marshal event: %w", err)
 	}
-	b := asJSON.Bytes()
 
 	evtSize := float64(len(b))
 	bytesEmitted.Add(evtSize)
