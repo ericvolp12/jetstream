@@ -59,6 +59,12 @@ func main() {
 			EnvVars: []string{"JETSTREAM_LISTEN_ADDR"},
 		},
 		&cli.StringFlag{
+			Name:    "metrics-listen-addr",
+			Usage:   "addr to serve prometheus metrics on",
+			Value:   ":6009",
+			EnvVars: []string{"JETSTREAM_METRICS_LISTEN_ADDR"},
+		},
+		&cli.StringFlag{
 			Name:    "data-dir",
 			Usage:   "directory to store data (pebbleDB)",
 			Value:   "./data",
@@ -201,15 +207,22 @@ func Jetstream(cctx *cli.Context) error {
 		}
 	}()
 
+	m := echo.New()
+	m.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
+	m.GET("/debug/pprof/*", echo.WrapHandler(http.DefaultServeMux))
+
+	metricsServer := &http.Server{
+		Addr:    cctx.String("metrics-listen-addr"),
+		Handler: m,
+	}
+
 	e := echo.New()
 	e.GET("/", func(c echo.Context) error {
-		return c.String(http.StatusOK, "Hello, World!")
+		return c.String(http.StatusOK, "Welcome to Jetstream")
 	})
-	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
-	e.GET("/debug/pprof/*", echo.WrapHandler(http.DefaultServeMux))
 	e.GET("/subscribe", s.HandleSubscribe)
 
-	httpServer := &http.Server{
+	jetServer := &http.Server{
 		Addr:    cctx.String("listen-addr"),
 		Handler: e,
 	}
@@ -223,16 +236,39 @@ func Jetstream(cctx *cli.Context) error {
 		logger.Info("echo server listening", "addr", cctx.String("listen-addr"))
 
 		go func() {
-			if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
+			if err := jetServer.ListenAndServe(); err != http.ErrServerClosed {
 				logger.Error("failed to start echo server", "error", err)
 			}
 		}()
+
 		<-shutdownEcho
-		if err := httpServer.Shutdown(ctx); err != nil {
+		if err := jetServer.Shutdown(ctx); err != nil {
 			logger.Error("failed to shutdown echo server", "error", err)
 		}
 		logger.Info("echo server shut down")
 		close(echoShutdown)
+	}()
+
+	// Startup metrics server
+	shutdownMetrics := make(chan struct{})
+	metricsShutdown := make(chan struct{})
+	go func() {
+		logger := log.With("source", "metrics_server")
+
+		logger.Info("metrics server listening", "addr", cctx.String("metrics-listen-addr"))
+
+		go func() {
+			if err := metricsServer.ListenAndServe(); err != http.ErrServerClosed {
+				logger.Error("failed to start metrics server", "error", err)
+			}
+		}()
+
+		<-shutdownMetrics
+		if err := metricsServer.Shutdown(ctx); err != nil {
+			logger.Error("failed to shutdown metrics server", "error", err)
+		}
+		logger.Info("metrics server shut down")
+		close(metricsShutdown)
 	}()
 
 	if c.Progress.LastSeq >= 0 {
@@ -290,11 +326,13 @@ func Jetstream(cctx *cli.Context) error {
 	close(shutdownLivenessChecker)
 	close(shutdownCursorManager)
 	close(shutdownEcho)
+	close(shutdownMetrics)
 
 	<-repoStreamShutdown
 	<-livenessCheckerShutdown
 	<-cursorManagerShutdown
 	<-echoShutdown
+	<-metricsShutdown
 
 	c.Shutdown()
 
