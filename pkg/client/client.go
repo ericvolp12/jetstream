@@ -79,9 +79,9 @@ func (c *Client) ConnectAndRead(ctx context.Context, cursor *int64) error {
 	}
 
 	if len(params) > 0 {
-		fullURL += "?" + url.QueryEscape(params[0])
+		fullURL += "?" + params[0]
 		for _, p := range params[1:] {
-			fullURL += "&" + url.QueryEscape(p)
+			fullURL += "&" + p
 		}
 	}
 
