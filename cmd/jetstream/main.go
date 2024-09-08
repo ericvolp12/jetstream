@@ -43,13 +43,13 @@ func main() {
 		&cli.IntFlag{
 			Name:    "worker-count",
 			Usage:   "number of workers to process events",
-			Value:   10,
+			Value:   100,
 			EnvVars: []string{"JETSTREAM_WORKER_COUNT"},
 		},
 		&cli.IntFlag{
 			Name:    "max-queue-size",
 			Usage:   "max number of events to queue",
-			Value:   10,
+			Value:   1000,
 			EnvVars: []string{"JETSTREAM_MAX_QUEUE_SIZE"},
 		},
 		&cli.StringFlag{
@@ -135,7 +135,7 @@ func Jetstream(cctx *cli.Context) error {
 
 	s.Consumer = c
 
-	scheduler := parallel.NewScheduler(100, 1_000, "prod-firehose", c.HandleStreamEvent)
+	scheduler := parallel.NewScheduler(cctx.Int("worker-count"), cctx.Int("max-queue-size"), "prod-firehose", c.HandleStreamEvent)
 
 	// Start a goroutine to manage the cursor, saving the current cursor every 5 seconds.
 	shutdownCursorManager := make(chan struct{})
