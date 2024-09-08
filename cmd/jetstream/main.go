@@ -296,6 +296,8 @@ func Jetstream(cctx *cli.Context) error {
 	<-cursorManagerShutdown
 	<-echoShutdown
 
+	c.Shutdown()
+
 	err = c.DB.Close()
 	if err != nil {
 		log.Error("failed to close pebble db", "error", err)

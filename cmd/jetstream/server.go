@@ -124,11 +124,6 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, ti
 		}
 	}
 
-	// Skip events that are older than the subscriber's last seen event
-	if timeUS <= sub.seq {
-		return nil
-	}
-
 	evtBytes := getEncodedEvent()
 	if playback {
 		// Copy the event bytes so the playback iterator can reuse the buffer

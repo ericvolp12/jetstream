@@ -27,7 +27,7 @@ func main() {
 		log.Fatalf("failed to create client: %v", err)
 	}
 
-	cursor := time.Now().Add(5 * -time.Minute).UnixMicro()
+	cursor := time.Now().Add(15 * -time.Second).UnixMicro()
 
 	c.Handler = &handler{
 		seenSeqs: make(map[int64]struct{}),
@@ -54,6 +54,11 @@ func (h *handler) OnEvent(ctx context.Context, event *models.Event) error {
 	}
 	h.seenSeqs[event.TimeUS] = struct{}{}
 
+	// If there's a gap of more than 50ms, log it
+	if event.TimeUS > h.highwater+50_000 {
+		log.Printf("gap of %dus", event.TimeUS-h.highwater)
+	}
+
 	if event.TimeUS > h.highwater {
 		h.highwater = event.TimeUS
 	} else {
@@ -68,7 +73,7 @@ func (h *handler) OnEvent(ctx context.Context, event *models.Event) error {
 			if err := json.Unmarshal(event.Commit.Record, &post); err != nil {
 				return fmt.Errorf("failed to unmarshal post: %w", err)
 			}
-			fmt.Printf("%v |(%s)| %s\n", time.UnixMicro(event.TimeUS).Local().Format("15:04:05"), event.Did, post.Text)
+			// fmt.Printf("%v |(%s)| %s\n", time.UnixMicro(event.TimeUS).Local().Format("15:04:05"), event.Did, post.Text)
 		}
 	}
 

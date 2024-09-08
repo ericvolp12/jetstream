@@ -107,7 +107,7 @@ func (c *Consumer) PersistEvent(ctx context.Context, evt *models.Event) error {
 		key = []byte(fmt.Sprintf("%d_%s", evt.TimeUS, evt.Did))
 	}
 
-	err = c.DB.Set(key, data, pebble.Sync)
+	err = c.DB.Set(key, data, pebble.NoSync)
 	if err != nil {
 		log.Error("failed to write event to pebble", "error", err)
 		return fmt.Errorf("failed to write event to pebble: %w", err)
