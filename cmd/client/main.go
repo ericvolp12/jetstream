@@ -29,7 +29,7 @@ func main() {
 
 	config := client.DefaultClientConfig()
 	config.WebsocketURL = serverAddr
-	config.WantedCollections = []string{"app.bsky.feed.post"}
+	config.WantedCollections = []string{"app.bsky.feed.post", "app.bsky.feed.like"}
 
 	h := &handler{
 		seenSeqs: make(map[int64]struct{}),
@@ -42,7 +42,7 @@ func main() {
 		log.Fatalf("failed to create client: %v", err)
 	}
 
-	cursor := time.Now().Add(15 * -time.Second).UnixMicro()
+	cursor := time.Now().Add(2 * -time.Minute).UnixMicro()
 
 	if err := c.ConnectAndRead(ctx, &cursor); err != nil {
 		log.Fatalf("failed to connect: %v", err)
@@ -63,6 +63,10 @@ func (h *handler) HandleEvent(ctx context.Context, event *models.Event) error {
 	}
 	h.seenSeqs[event.TimeUS] = struct{}{}
 
+	if event.TimeUS > h.highwater+200_000 {
+		fmt.Printf("large gap: %0.3fms\n", float64(event.TimeUS-h.highwater)/1000)
+	}
+
 	if event.TimeUS > h.highwater {
 		h.highwater = event.TimeUS
 	} else {
@@ -77,7 +81,7 @@ func (h *handler) HandleEvent(ctx context.Context, event *models.Event) error {
 			if err := json.Unmarshal(event.Commit.Record, &post); err != nil {
 				return fmt.Errorf("failed to unmarshal post: %w", err)
 			}
-			fmt.Printf("%v |(%s)| %s\n", time.UnixMicro(event.TimeUS).Local().Format("15:04:05"), event.Did, post.Text)
+			// fmt.Printf("%v |(%s)| %s\n", time.UnixMicro(event.TimeUS).Local().Format("15:04:05"), event.Did, post.Text)
 		}
 	}
 

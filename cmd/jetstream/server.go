@@ -44,6 +44,7 @@ type Server struct {
 	nextSub     int64
 	Consumer    *consumer.Consumer
 	maxSubRate  float64
+	seq         int64
 }
 
 func NewServer(maxSubRate float64) (*Server, error) {
@@ -56,6 +57,7 @@ func NewServer(maxSubRate float64) (*Server, error) {
 }
 
 var maxConcurrentEmits = int64(100)
+var cutoverThresholdUS = int64(1_000_000)
 
 func (s *Server) Emit(ctx context.Context, e models.Event) error {
 	ctx, span := tracer.Start(ctx, "Emit")
@@ -95,8 +97,8 @@ func (s *Server) Emit(ctx context.Context, e models.Event) error {
 			sub.cLk.Lock()
 			defer sub.cLk.Unlock()
 
-			// Don't emit events to subscribers that are replaying and are more than 1 second behind
-			if sub.cursor != nil && *sub.cursor < e.TimeUS-1_000_000 {
+			// Don't emit events to subscribers that are replaying and are too far behind
+			if sub.cursor != nil && sub.seq < e.TimeUS-cutoverThresholdUS {
 				return
 			}
 			emitToSubscriber(ctx, log, sub, e.TimeUS, e.Did, collection, false, getEncodedEvent)
@@ -107,6 +109,8 @@ func (s *Server) Emit(ctx context.Context, e models.Event) error {
 		log.Error("failed to acquire semaphore", "error", err)
 		return fmt.Errorf("failed to acquire semaphore: %w", err)
 	}
+
+	s.seq = e.TimeUS
 
 	return nil
 }
@@ -172,6 +176,12 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, ti
 	}
 
 	return nil
+}
+
+func (s *Server) GetSeq() int64 {
+	s.lk.RLock()
+	defer s.lk.RUnlock()
+	return s.seq
 }
 
 func (s *Server) AddSubscriber(ws *websocket.Conn, realIP string, wantedCollections []string, wantedDids []string, cursor *int64) *Subscriber {
@@ -296,12 +306,28 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		log.Info("replaying events", "cursor", *cursor)
 		playbackRateLimit := s.maxSubRate * 10
 		go func() {
-			err := s.Consumer.ReplayEvents(ctx, *cursor, playbackRateLimit, func(ctx context.Context, timeUS int64, did, collection string, getEncodedEvent func() []byte) error {
-				return emitToSubscriber(ctx, log, sub, timeUS, did, collection, true, getEncodedEvent)
-			})
-			if err != nil {
-				log.Error("failed to replay events", "error", err)
-				cancel()
+			for {
+				lastSeq, err := s.Consumer.ReplayEvents(ctx, *cursor, playbackRateLimit, func(ctx context.Context, timeUS int64, did, collection string, getEncodedEvent func() []byte) error {
+					return emitToSubscriber(ctx, log, sub, timeUS, did, collection, true, getEncodedEvent)
+				})
+				if err != nil {
+					log.Error("failed to replay events", "error", err)
+					cancel()
+					return
+				}
+				serverLastSeq := s.GetSeq()
+				log.Info("finished replaying events", "replay_last_time", time.UnixMicro(lastSeq), "server_last_time", time.UnixMicro(serverLastSeq))
+
+				// If last event replayed is close enough to the last live event, start live tailing
+				if lastSeq > serverLastSeq-(cutoverThresholdUS/2) {
+					break
+				}
+
+				// Otherwise, update the cursor and replay again
+				lastSeq++
+				sub.cLk.Lock()
+				cursor = &lastSeq
+				sub.cLk.Unlock()
 			}
 			log.Info("finished replaying events, starting live tail")
 			sub.cLk.Lock()

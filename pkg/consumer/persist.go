@@ -140,7 +140,7 @@ func (c *Consumer) TrimEvents(ctx context.Context) error {
 var finalKey = []byte("9700000000000000")
 
 // ReplayEvents replays events from PebbleDB
-func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateLimit float64, emit func(context.Context, int64, string, string, func() []byte) error) error {
+func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateLimit float64, emit func(context.Context, int64, string, string, func() []byte) error) (int64, error) {
 	ctx, span := tracer.Start(ctx, "ReplayEvents")
 	defer span.End()
 
@@ -149,25 +149,26 @@ func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateL
 	limiter := rate.NewLimiter(rate.Limit(playbackRateLimit), int(playbackRateLimit))
 
 	// Iterate over all events starting from the cursor
-	iter, err := c.DB.NewIter(&pebble.IterOptions{
+	iter, err := c.DB.NewIterWithContext(ctx, &pebble.IterOptions{
 		LowerBound: []byte(fmt.Sprintf("%d", cursor)),
 		UpperBound: finalKey,
 	})
 	if err != nil {
 		log.Error("failed to create iterator", "error", err)
-		return fmt.Errorf("failed to create iterator: %w", err)
+		return 0, fmt.Errorf("failed to create iterator: %w", err)
 	}
 	defer iter.Close()
 
 	// This iterator will return events in ascending order of time, starting from the cursor
 	// and stopping when it reaches the end of the database
 	// if you never reach the end of the database, you'll just keep consuming slower than the events are produced
+	lastSeq := int64(0)
 	for iter.First(); iter.Valid(); iter.Next() {
 		// Wait for the rate limiter
 		err := limiter.Wait(ctx)
 		if err != nil {
 			log.Error("failed to wait for rate limiter", "error", err)
-			return fmt.Errorf("failed to wait for rate limiter: %w", err)
+			return 0, fmt.Errorf("failed to wait for rate limiter: %w", err)
 		}
 
 		// Unpack the key ({{event_time_us}}_{{repo}}_{{collection}})
@@ -175,13 +176,13 @@ func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateL
 		parts := strings.Split(key, "_")
 		if len(parts) < 2 {
 			log.Error("invalid key format", "key", key)
-			return fmt.Errorf("invalid key format: %s", key)
+			return 0, fmt.Errorf("invalid key format: %s", key)
 		}
 
 		timeUS, err := strconv.ParseInt(parts[0], 10, 64)
 		if err != nil {
 			log.Error("failed to parse timeUS from event", "error", err)
-			return fmt.Errorf("failed to parse timeUS: %w", err)
+			return 0, fmt.Errorf("failed to parse timeUS: %w", err)
 		}
 
 		collection := ""
@@ -193,9 +194,11 @@ func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateL
 		err = emit(ctx, timeUS, parts[1], collection, iter.Value)
 		if err != nil {
 			log.Error("failed to emit event", "error", err)
-			return fmt.Errorf("failed to emit event: %w", err)
+			return 0, fmt.Errorf("failed to emit event: %w", err)
 		}
+
+		lastSeq = timeUS
 	}
 
-	return nil
+	return lastSeq, nil
 }
