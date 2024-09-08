@@ -1,8 +1,10 @@
-# Jetstream
+# Jetstream [WIP]
 
 Jetstream is a streaming service that consumes an ATProto `com.atproto.sync.subscribeRepos` stream and converts it into lightweight, friendly JSON.
 
 Jetstream converts the CBOR-encoded MST blocks produced by the ATProto firehose and translates them into JSON objects that are easier to interface with using standard tooling available in programming languages.
+
+FYI there are some existing limitations around cursors/playback switchover that are WIP so if you want the best experience, just run in live-tailing mode (without a cursor).
 
 ## Running Jetstream
 
