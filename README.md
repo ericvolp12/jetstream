@@ -4,8 +4,6 @@ Jetstream is a streaming service that consumes an ATProto `com.atproto.sync.subs
 
 Jetstream converts the CBOR-encoded MST blocks produced by the ATProto firehose and translates them into JSON objects that are easier to interface with using standard tooling available in programming languages.
 
-FYI there are some existing limitations around cursors/playback switchover that are WIP so if you want the best experience, just run in live-tailing mode (without a cursor).
-
 ## Running Jetstream
 
 To run Jetstream, make sure you have docker and docker compose installed and run `make up` in the repo root.
@@ -15,6 +13,10 @@ This will start a Jetstream instance at `http://localhost:6008`
 Once started, you can connect to the event stream at: `ws://localhost:6008/subscribe`
 
 Prometheus metrics are exposed at `http://localhost:6008/metrics`
+
+A [Grafana Dashboard](#dashboard-preview) for Jetstream is available at `./grafana-dashboard.json` and should be easy to copy/paste into Grafana's dashboard import prompt.
+
+- This dashboard has a few device-specific graphs for disk and network usage that require NodeExporter and may need to be tuned to your setup.
 
 ## Consuming Jetstream
 
@@ -118,3 +120,7 @@ $ websocat "ws://localhost:6008/subscribe?wantedCollections=app.bsky.feed.post&w
   }
 }
 ```
+
+### Dashboard Preview
+
+![A screenshot of the Jetstream Grafana Dashboard](./docs/dash.png)
