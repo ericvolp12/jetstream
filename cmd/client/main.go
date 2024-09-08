@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"os"
 	"time"
 
 	apibsky "github.com/bluesky-social/indigo/api/bsky"
 	"github.com/ericvolp12/jetstream/pkg/client"
+	"github.com/ericvolp12/jetstream/pkg/client/schedulers/sequential"
 	"github.com/ericvolp12/jetstream/pkg/models"
 	"github.com/goccy/go-json"
 )
@@ -18,22 +20,29 @@ const (
 )
 
 func main() {
+	ctx := context.Background()
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level:     slog.LevelInfo,
+		AddSource: true,
+	})))
+	logger := slog.Default()
+
 	config := client.DefaultClientConfig()
 	config.WebsocketURL = serverAddr
 	config.WantedCollections = []string{"app.bsky.feed.post"}
 
-	c, err := client.NewClient(config)
+	h := &handler{
+		seenSeqs: make(map[int64]struct{}),
+	}
+
+	scheduler := sequential.NewScheduler("jetstream_localdev", logger, h.HandleEvent)
+
+	c, err := client.NewClient(config, logger, scheduler)
 	if err != nil {
 		log.Fatalf("failed to create client: %v", err)
 	}
 
 	cursor := time.Now().Add(15 * -time.Second).UnixMicro()
-
-	c.Handler = &handler{
-		seenSeqs: make(map[int64]struct{}),
-	}
-
-	ctx := context.Background()
 
 	if err := c.ConnectAndRead(ctx, &cursor); err != nil {
 		log.Fatalf("failed to connect: %v", err)
@@ -47,17 +56,12 @@ type handler struct {
 	highwater int64
 }
 
-func (h *handler) OnEvent(ctx context.Context, event *models.Event) error {
+func (h *handler) HandleEvent(ctx context.Context, event *models.Event) error {
 	_, ok := h.seenSeqs[event.TimeUS]
 	if ok {
 		log.Fatalf("dupe seq %d", event.TimeUS)
 	}
 	h.seenSeqs[event.TimeUS] = struct{}{}
-
-	// If there's a gap of more than 50ms, log it
-	if event.TimeUS > h.highwater+50_000 {
-		log.Printf("gap of %dus", event.TimeUS-h.highwater)
-	}
 
 	if event.TimeUS > h.highwater {
 		h.highwater = event.TimeUS
@@ -73,7 +77,7 @@ func (h *handler) OnEvent(ctx context.Context, event *models.Event) error {
 			if err := json.Unmarshal(event.Commit.Record, &post); err != nil {
 				return fmt.Errorf("failed to unmarshal post: %w", err)
 			}
-			// fmt.Printf("%v |(%s)| %s\n", time.UnixMicro(event.TimeUS).Local().Format("15:04:05"), event.Did, post.Text)
+			fmt.Printf("%v |(%s)| %s\n", time.UnixMicro(event.TimeUS).Local().Format("15:04:05"), event.Did, post.Text)
 		}
 	}
 

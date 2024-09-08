@@ -19,18 +19,17 @@ type ClientConfig struct {
 	ExtraHeaders      map[string]string
 }
 
-type Handler interface {
-	OnEvent(ctx context.Context, event *models.Event) error
+type Scheduler interface {
+	AddWork(ctx context.Context, repo string, evt *models.Event) error
+	Shutdown()
 }
 
 type Client struct {
-	con     *websocket.Conn
-	config  *ClientConfig
-	Handler Handler
-
-	logger *slog.Logger
-
-	shutdown chan chan struct{}
+	Scheduler Scheduler
+	con       *websocket.Conn
+	config    *ClientConfig
+	logger    *slog.Logger
+	shutdown  chan chan struct{}
 }
 
 func DefaultClientConfig() *ClientConfig {
@@ -44,17 +43,17 @@ func DefaultClientConfig() *ClientConfig {
 	}
 }
 
-func NewClient(config *ClientConfig) (*Client, error) {
+func NewClient(config *ClientConfig, logger *slog.Logger, scheduler Scheduler) (*Client, error) {
 	if config == nil {
 		config = DefaultClientConfig()
 	}
 
-	logger := slog.Default().With("component", "jetstream-client")
-
+	logger = logger.With("component", "jetstream-client")
 	return &Client{
-		config:   config,
-		shutdown: make(chan chan struct{}),
-		logger:   logger,
+		config:    config,
+		shutdown:  make(chan chan struct{}),
+		logger:    logger,
+		Scheduler: scheduler,
 	}, nil
 }
 
@@ -108,7 +107,7 @@ func (c *Client) ConnectAndRead(ctx context.Context, cursor *int64) error {
 }
 
 func (c *Client) readLoop(ctx context.Context) error {
-	c.logger.Info("starting read loop")
+	c.logger.Info("starting websocket read loop")
 
 	for {
 		select {
@@ -133,8 +132,9 @@ func (c *Client) readLoop(ctx context.Context) error {
 				return fmt.Errorf("failed to unmarshal event: %w", err)
 			}
 
-			if err := c.Handler.OnEvent(ctx, &event); err != nil {
-				c.logger.Error("failed to handle event", "error", err)
+			if err := c.Scheduler.AddWork(ctx, event.Did, &event); err != nil {
+				c.logger.Error("failed to add work to scheduler", "error", err)
+				return fmt.Errorf("failed to add work to scheduler: %w", err)
 			}
 		}
 	}
