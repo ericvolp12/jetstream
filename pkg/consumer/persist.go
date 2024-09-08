@@ -3,6 +3,7 @@ package consumer
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -139,7 +140,7 @@ func (c *Consumer) TrimEvents(ctx context.Context) error {
 var finalKey = []byte("9700000000000000")
 
 // ReplayEvents replays events from PebbleDB
-func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateLimit float64, emit func(context.Context, string, string, func() []byte) error) error {
+func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateLimit float64, emit func(context.Context, int64, string, string, func() []byte) error) error {
 	ctx, span := tracer.Start(ctx, "ReplayEvents")
 	defer span.End()
 
@@ -177,13 +178,19 @@ func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateL
 			return fmt.Errorf("invalid key format: %s", key)
 		}
 
+		timeUS, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil {
+			log.Error("failed to parse timeUS from event", "error", err)
+			return fmt.Errorf("failed to parse timeUS: %w", err)
+		}
+
 		collection := ""
 		if len(parts) > 2 {
 			collection = parts[2]
 		}
 
 		// Emit the event
-		err = emit(ctx, parts[1], collection, iter.Value)
+		err = emit(ctx, timeUS, parts[1], collection, iter.Value)
 		if err != nil {
 			log.Error("failed to emit event", "error", err)
 			return fmt.Errorf("failed to emit event: %w", err)

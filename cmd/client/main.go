@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	serverAddr = "wss://jetstream.atproto.tools/subscribe"
+	serverAddr = "ws://localhost:6008/subscribe"
 )
 
 func main() {
@@ -27,22 +27,39 @@ func main() {
 		log.Fatalf("failed to create client: %v", err)
 	}
 
-	cursor := time.Now().Add(-time.Hour).UnixMicro()
+	cursor := time.Now().Add(5 * -time.Minute).UnixMicro()
 
-	c.Handler = &handler{}
+	c.Handler = &handler{
+		seenSeqs: make(map[int64]struct{}),
+	}
 
 	ctx := context.Background()
 
-	if err := c.ConnectAndRead(ctx, cursor); err != nil {
+	if err := c.ConnectAndRead(ctx, &cursor); err != nil {
 		log.Fatalf("failed to connect: %v", err)
 	}
 
 	slog.Info("shutdown")
 }
 
-type handler struct{}
+type handler struct {
+	seenSeqs  map[int64]struct{}
+	highwater int64
+}
 
 func (h *handler) OnEvent(ctx context.Context, event *models.Event) error {
+	_, ok := h.seenSeqs[event.TimeUS]
+	if ok {
+		log.Fatalf("dupe seq %d", event.TimeUS)
+	}
+	h.seenSeqs[event.TimeUS] = struct{}{}
+
+	if event.TimeUS > h.highwater {
+		h.highwater = event.TimeUS
+	} else {
+		log.Fatalf("out of order event: %d", event.TimeUS)
+	}
+
 	// Unmarshal the record if there is one
 	if event.Commit != nil && (event.Commit.OpType == models.CommitCreateRecord || event.Commit.OpType == models.CommitUpdateRecord) {
 		switch event.Commit.Collection {
@@ -51,7 +68,7 @@ func (h *handler) OnEvent(ctx context.Context, event *models.Event) error {
 			if err := json.Unmarshal(event.Commit.Record, &post); err != nil {
 				return fmt.Errorf("failed to unmarshal post: %w", err)
 			}
-			fmt.Printf("(%s)| %s\n", event.Did, post.Text)
+			fmt.Printf("%v |(%s)| %s\n", time.UnixMicro(event.TimeUS).Local().Format("15:04:05"), event.Did, post.Text)
 		}
 	}
 

@@ -95,11 +95,11 @@ func (s *Server) Emit(ctx context.Context, e models.Event) error {
 			sub.cLk.Lock()
 			defer sub.cLk.Unlock()
 
-			// Don't emit to subscribers that are playing catch-up
-			if sub.cursor != nil {
+			// Don't emit events to subscribers that are replaying and are more than 1 second behind
+			if sub.cursor != nil && *sub.cursor < e.TimeUS-1_000_000 {
 				return
 			}
-			emitToSubscriber(ctx, log, sub, e.Did, collection, false, getEncodedEvent)
+			emitToSubscriber(ctx, log, sub, e.TimeUS, e.Did, collection, false, getEncodedEvent)
 		}(sub)
 	}
 
@@ -111,7 +111,7 @@ func (s *Server) Emit(ctx context.Context, e models.Event) error {
 	return nil
 }
 
-func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, did, collection string, playback bool, getEncodedEvent func() []byte) error {
+func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, timeUS int64, did, collection string, playback bool, getEncodedEvent func() []byte) error {
 	if len(sub.wantedCollections) > 0 && collection != "" {
 		if _, ok := sub.wantedCollections[collection]; !ok {
 			return nil
@@ -122,6 +122,11 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, di
 		if _, ok := sub.wantedDids[did]; !ok {
 			return nil
 		}
+	}
+
+	// Skip events that are older than the subscriber's last seen event
+	if timeUS <= sub.seq {
+		return nil
 	}
 
 	evtBytes := getEncodedEvent()
@@ -138,7 +143,7 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, di
 			}
 			return ctx.Err()
 		case sub.buf <- &evtBytes:
-			sub.seq++
+			sub.seq = timeUS
 			sub.deliveredCounter.Inc()
 			sub.bytesCounter.Add(float64(len(evtBytes)))
 		}
@@ -153,7 +158,7 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, di
 			}
 			return ctx.Err()
 		case sub.buf <- &evtBytes:
-			sub.seq++
+			sub.seq = timeUS
 			sub.deliveredCounter.Inc()
 			sub.bytesCounter.Add(float64(len(evtBytes)))
 		default:
@@ -291,8 +296,8 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		log.Info("replaying events", "cursor", *cursor)
 		playbackRateLimit := s.maxSubRate * 10
 		go func() {
-			err := s.Consumer.ReplayEvents(ctx, *cursor, playbackRateLimit, func(ctx context.Context, did, collection string, getEncodedEvent func() []byte) error {
-				return emitToSubscriber(ctx, log, sub, did, collection, true, getEncodedEvent)
+			err := s.Consumer.ReplayEvents(ctx, *cursor, playbackRateLimit, func(ctx context.Context, timeUS int64, did, collection string, getEncodedEvent func() []byte) error {
+				return emitToSubscriber(ctx, log, sub, timeUS, did, collection, true, getEncodedEvent)
 			})
 			if err != nil {
 				log.Error("failed to replay events", "error", err)
