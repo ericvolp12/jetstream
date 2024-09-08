@@ -18,7 +18,7 @@ var opsProcessedCounter = promauto.NewCounterVec(prometheus.CounterOpts{
 var eventProcessingDurationHistogram = promauto.NewHistogramVec(prometheus.HistogramOpts{
 	Name:    "consumer_event_processing_duration_seconds",
 	Help:    "The amount of time it takes to process a firehose event",
-	Buckets: prometheus.ExponentialBuckets(0.001, 2, 15),
+	Buckets: prometheus.ExponentialBuckets(0.0001, 2, 18),
 }, []string{"socket_url"})
 
 var lastSeqGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
