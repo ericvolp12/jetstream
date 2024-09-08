@@ -12,6 +12,6 @@ services:
     environment:
       - JETSTREAM_DATA_DIR=/data
     ports:
-      - "6008:6008"
+    network_mode: host
     volumes:
       - ./data:/data
