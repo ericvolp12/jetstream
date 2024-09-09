@@ -53,22 +53,23 @@ $ websocat "ws://localhost:6008/subscribe?wantedCollections=app.bsky.feed.post&w
 
 ```json
 {
-  "did": "did:plc:stk5dhwhpcjxtlwnhbknmfgx",
-  "time_us": 1725516666734038,
+  "did": "did:plc:eygmaihciaxprqvxpfvl6flk",
+  "time_us": 1725911162329308,
   "type": "com",
   "commit": {
-    "rev": "3l3f6nzhvkl2g",
+    "rev": "3l3qo2vutsw2b",
     "type": "c",
     "collection": "app.bsky.feed.like",
-    "rkey": "3l3f6nzhls32g",
+    "rkey": "3l3qo2vuowo2b",
     "record": {
       "$type": "app.bsky.feed.like",
-      "createdAt": "2024-09-05T06:11:06.451Z",
+      "createdAt": "2024-09-09T19:46:02.102Z",
       "subject": {
-        "cid": "bafyreihdlrrfxc4l5few7lso3u36zf655omeuso3y3dnersr5mm3r7mbyu",
-        "uri": "at://did:plc:ou4u4h3khiaym4a43r7uwp4f/app.bsky.feed.post/3l3e3vz53lu2d"
+        "cid": "bafyreidc6sydkkbchcyg62v77wbhzvb2mvytlmsychqgwf2xojjtirmzj4",
+        "uri": "at://did:plc:wa7b35aakoll7hugkrjtf3xf/app.bsky.feed.post/3l3pte3p2e325"
       }
-    }
+    },
+    "cid": "bafyreidwaivazkwu67xztlmuobx35hs2lnfh3kolmgfmucldvhd3sgzcqi"
   }
 }
 ```

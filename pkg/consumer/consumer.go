@@ -217,7 +217,8 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				break
 			}
 
-			if rcid.String() != op.Cid.String() {
+			recCid := rcid.String()
+			if recCid != op.Cid.String() {
 				log.Error("record cid mismatch", "expected", *op.Cid, "actual", rcid)
 				break
 			}
@@ -239,6 +240,7 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				Collection: collection,
 				RKey:       rkey,
 				Record:     recJSON,
+				CID:        recCid,
 			}
 		case repomgr.EvtKindUpdateRecord:
 			if op.Cid == nil {
@@ -252,7 +254,8 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				break
 			}
 
-			if rcid.String() != op.Cid.String() {
+			recCid := rcid.String()
+			if recCid != op.Cid.String() {
 				log.Error("record cid mismatch", "expected", *op.Cid, "actual", rcid)
 				break
 			}
@@ -274,6 +277,7 @@ func (c *Consumer) HandleRepoCommit(ctx context.Context, evt *comatproto.SyncSub
 				Collection: collection,
 				RKey:       rkey,
 				Record:     recJSON,
+				CID:        recCid,
 			}
 		case repomgr.EvtKindDeleteRecord:
 			// Emit the delete
