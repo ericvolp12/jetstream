@@ -287,12 +287,13 @@ func Jetstream(cctx *cli.Context) error {
 
 	// If the override cursor is set, use that instead of the last cursor in the database
 	if cursorOverride >= 0 {
+		log.Info("overriding cursor", "cursor", cursorOverride)
 		cursor = &cursorOverride
 	}
 
 	// If the cursor is nil, we are starting from live
 	if cursor != nil {
-		u.RawQuery = fmt.Sprintf("cursor=%d", c.Progress.LastSeq)
+		u.RawQuery = fmt.Sprintf("cursor=%d", *cursor)
 	}
 
 	log.Info("connecting to websocket", "url", u.String())
