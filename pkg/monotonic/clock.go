@@ -41,9 +41,9 @@ func (c *Clock) Now() int64 {
 	case time.Second:
 		now = s.Unix()
 	case time.Millisecond:
-		now = s.UnixMicro()
-	case time.Microsecond:
 		now = s.UnixMilli()
+	case time.Microsecond:
+		now = s.UnixMicro()
 	case time.Nanosecond:
 		now = s.UnixNano()
 	}
