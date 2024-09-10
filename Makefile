@@ -1,6 +1,6 @@
 GO_CMD_W_CGO = CGO_ENABLED=1 GOOS=linux go
 GO_CMD = CGO_ENABLED=0 GOOS=linux go
-JETSTREAM_VERSION = $(shell git rev-parse HEAD)
+JETSTREAM_VERSION = sha-$(shell git rev-parse HEAD)
 
 # Build Jetstream
 .PHONY: build
