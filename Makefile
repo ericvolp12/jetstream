@@ -1,5 +1,6 @@
 GO_CMD_W_CGO = CGO_ENABLED=1 GOOS=linux go
 GO_CMD = CGO_ENABLED=0 GOOS=linux go
+JETSTREAM_VERSION = $(shell git rev-parse HEAD)
 
 # Build Jetstream
 .PHONY: build
@@ -16,12 +17,12 @@ run: .env
 .PHONY: up
 up:
 	@echo "Starting Jetstream..."
-	docker compose up -d
+	JETSTREAM_VERSION=${JETSTREAM_VERSION} docker compose up -d
 
 .PHONY: rebuild
 rebuild:
 	@echo "Starting Jetstream..."
-	docker compose up -d --build
+	JETSTREAM_VERSION=${JETSTREAM_VERSION} docker compose up -d --build
 
 .PHONY: down
 down:

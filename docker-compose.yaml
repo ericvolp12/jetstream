@@ -1,6 +1,6 @@
 services:
   jetstream:
-    image: ghcr.io/ericvolp12/jetstream:main
+    image: ghcr.io/ericvolp12/jetstream:${JETSTREAM_VERSION}
     build:
       context: .
       dockerfile: Dockerfile
