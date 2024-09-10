@@ -1,16 +1,13 @@
-version: '3.8'
 services:
   jetstream:
+    image: ghcr.io/ericvolp12/jetstream:main
     build:
       context: .
       dockerfile: Dockerfile
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     restart: always
-    image: jetstream
     container_name: jetstream
-    environment:
-      - JETSTREAM_DATA_DIR=/data
     network_mode: host
     volumes:
       - ./data:/data
+    environment:
+      - JETSTREAM_DATA_DIR=/data

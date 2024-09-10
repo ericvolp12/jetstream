@@ -15,6 +15,7 @@ import (
 	"github.com/bluesky-social/indigo/repomgr"
 	"github.com/cockroachdb/pebble"
 	"github.com/ericvolp12/jetstream/pkg/models"
+	"github.com/ericvolp12/jetstream/pkg/monotonic"
 	"github.com/goccy/go-json"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel"
@@ -29,6 +30,7 @@ type Consumer struct {
 	DB                *pebble.DB
 	EventTTL          time.Duration
 	logger            *slog.Logger
+	clock             *monotonic.Clock
 	buf               chan *models.Event
 	sequencerShutdown chan chan struct{}
 
@@ -56,6 +58,11 @@ func NewConsumer(
 
 	log := logger.With("component", "consumer")
 
+	clock, err := monotonic.NewClock(time.Microsecond)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create clock: %w", err)
+	}
+
 	c := Consumer{
 		SocketURL: socketURL,
 		Progress: &Progress{
@@ -65,6 +72,7 @@ func NewConsumer(
 		Emit:              emit,
 		DB:                db,
 		logger:            log,
+		clock:             clock,
 		buf:               make(chan *models.Event, 10_000),
 		sequencerShutdown: make(chan chan struct{}),
 
@@ -315,7 +323,7 @@ func (c *Consumer) RunSequencer(ctx context.Context) error {
 				return
 			case e := <-c.buf:
 				// Assign a time_us to the event
-				e.TimeUS = time.Now().UnixMicro()
+				e.TimeUS = c.clock.Now()
 				c.sequenced.Inc()
 				if err := c.PersistEvent(ctx, e); err != nil {
 					log.Error("failed to persist event", "error", err)

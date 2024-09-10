@@ -16,6 +16,11 @@ run: .env
 .PHONY: up
 up:
 	@echo "Starting Jetstream..."
+	docker compose up -d
+
+.PHONY: rebuild
+rebuild:
+	@echo "Starting Jetstream..."
 	docker compose up -d --build
 
 .PHONY: down
