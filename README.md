@@ -8,7 +8,9 @@ Jetstream converts the CBOR-encoded MST blocks produced by the ATProto firehose 
 
 To run Jetstream, make sure you have docker and docker compose installed and run `make up` in the repo root.
 
-This will start a Jetstream instance at `http://localhost:6008`
+This will pull the latest built image from GHCR and start a Jetstream instance at `http://localhost:6008`
+
+- To build Jetstream from source via Docker and start it up, run `make rebuild`
 
 Once started, you can connect to the event stream at: `ws://localhost:6008/subscribe`
 
