@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/ericvolp12/jetstream/pkg/models"
+	"github.com/bluesky-social/jetstream/pkg/models"
 	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
 )

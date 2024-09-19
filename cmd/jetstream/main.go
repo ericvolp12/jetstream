@@ -16,8 +16,7 @@ import (
 
 	"github.com/bluesky-social/indigo/events"
 	"github.com/bluesky-social/indigo/events/schedulers/parallel"
-	"github.com/ericvolp12/bsky-experiments/pkg/tracing"
-	"github.com/ericvolp12/jetstream/pkg/consumer"
+	"github.com/bluesky-social/jetstream/pkg/consumer"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -112,20 +111,6 @@ func Jetstream(cctx *cli.Context) error {
 	u, err := url.Parse(cctx.String("ws-url"))
 	if err != nil {
 		return fmt.Errorf("failed to parse ws-url: %w", err)
-	}
-
-	// Registers a tracer Provider globally if the exporter endpoint is set
-	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
-		log.Info("initializing tracer...")
-		shutdown, err := tracing.InstallExportPipeline(ctx, "Jetstream", 0.01)
-		if err != nil {
-			return fmt.Errorf("failed to initialize tracer: %w", err)
-		}
-		defer func() {
-			if err := shutdown(ctx); err != nil {
-				log.Error("failed to shutdown tracer", "error", err)
-			}
-		}()
 	}
 
 	s, err := NewServer(cctx.Float64("max-sub-rate"))

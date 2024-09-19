@@ -8,9 +8,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/ericvolp12/jetstream/pkg/client"
-	"github.com/ericvolp12/jetstream/pkg/client/schedulers/sequential"
-	"github.com/ericvolp12/jetstream/pkg/models"
+	"github.com/bluesky-social/jetstream/pkg/client"
+	"github.com/bluesky-social/jetstream/pkg/client/schedulers/sequential"
+	"github.com/bluesky-social/jetstream/pkg/models"
 )
 
 const (

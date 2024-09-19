@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/atproto/syntax"
-	"github.com/ericvolp12/jetstream/pkg/consumer"
-	"github.com/ericvolp12/jetstream/pkg/models"
+	"github.com/bluesky-social/jetstream/pkg/consumer"
+	"github.com/bluesky-social/jetstream/pkg/models"
 	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"

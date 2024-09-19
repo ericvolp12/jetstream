@@ -1,6 +1,6 @@
 services:
   jetstream:
-    image: ghcr.io/ericvolp12/jetstream:${JETSTREAM_VERSION}
+    image: ghcr.io/bluesky-social/jetstream:${JETSTREAM_VERSION}
     build:
       context: .
       dockerfile: Dockerfile

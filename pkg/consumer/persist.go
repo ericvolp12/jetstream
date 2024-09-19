@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bluesky-social/jetstream/pkg/models"
 	"github.com/cockroachdb/pebble"
-	"github.com/ericvolp12/jetstream/pkg/models"
 	"github.com/goccy/go-json"
 	"github.com/labstack/gommon/log"
 	"golang.org/x/time/rate"
