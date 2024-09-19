@@ -1,4 +1,4 @@
-# Jetstream [WIP]
+# Jetstream
 
 Jetstream is a streaming service that consumes an ATProto `com.atproto.sync.subscribeRepos` stream and converts it into lightweight, friendly JSON.
 

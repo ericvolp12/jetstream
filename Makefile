@@ -27,4 +27,4 @@ rebuild:
 .PHONY: down
 down:
 	@echo "Stopping Jetstream..."
-	docker compose down
+	JETSTREAM_VERSION=${JETSTREAM_VERSION} docker compose down
