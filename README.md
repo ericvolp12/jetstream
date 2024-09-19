@@ -1,5 +1,9 @@
 # Jetstream
 
+## FYI: Jetstream is now being maintained in the [bsky-social](https://github.com/bluesky-social/jetstream) org
+
+This repo will stick around as an artifact but the fork in `bsky-social` is where I'll be making active updates.
+
 Jetstream is a streaming service that consumes an ATProto `com.atproto.sync.subscribeRepos` stream and converts it into lightweight, friendly JSON.
 
 Jetstream converts the CBOR-encoded MST blocks produced by the ATProto firehose and translates them into JSON objects that are easier to interface with using standard tooling available in programming languages.
