@@ -31,8 +31,11 @@ Connect to `ws://localhost:6008/subscribe` to start the stream
 The following Query Parameters are supported:
 
 - `wantedCollections` - An array of [Collection NSIDs](https://atproto.com/specs/nsid) to filter which records you receive on your stream (default empty = all collections)
-  - Regardless of desired collections, all subscribers recieve Account and Identity events
+  - `wantedCollections` supports NSID path prefixes i.e. `app.bsky.graph.*`, or `app.bsky.*`. The prefix before the `.*` must pass NSID validation and Jetstream **does not** support incomplete prefixes i.e. `app.bsky.graph.fo*`.
+  - Regardless of desired collections, all subscribers recieve Account and Identity events.
+  - You can specify at most 100 wanted collections/prefixes.
 - `wantedDids` - An array of Repo DIDs to filter which records you receive on your stream (Default empty = all repos)
+  - You can specify at most 10,000 wanted DIDs.
 - `cursor` - A unix microseconds timestamp cursor to begin playback from
   - An absent cursor or a cursor from the future will result in live-tail operation
   - When reconnecting, use the `time_us` from your most recently processed event and maybe provide a negative buffer (i.e. subtract a few seconds) to ensure gapless playback
