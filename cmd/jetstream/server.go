@@ -269,11 +269,6 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		for _, wantedCol := range qWantedCollections {
 			if strings.HasSuffix(wantedCol, ".*") {
 				wantedCollectionPrefixes = append(wantedCollectionPrefixes, strings.TrimSuffix(wantedCol, "*"))
-				// Make sure the prefix is valid
-				if _, err := syntax.ParseNSID(strings.TrimSuffix(wantedCol, ".*")); err != nil {
-					c.String(http.StatusBadRequest, fmt.Sprintf("invalid collection prefix: %s", wantedCol))
-					return fmt.Errorf("invalid collection prefix: %s", wantedCol)
-				}
 				continue
 			}
 
