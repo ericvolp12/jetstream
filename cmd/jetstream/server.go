@@ -14,9 +14,7 @@ import (
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/bluesky-social/jetstream/pkg/consumer"
 	"github.com/bluesky-social/jetstream/pkg/models"
-	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
-	"github.com/klauspost/compress/zstd"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/semaphore"
@@ -47,7 +45,6 @@ type Subscriber struct {
 	wantedCollections *WantedCollections
 	wantedDids        map[string]struct{}
 	rl                *rate.Limiter
-	encoder           *zstd.Encoder
 }
 
 type Server struct {
@@ -71,7 +68,7 @@ func NewServer(maxSubRate float64) (*Server, error) {
 var maxConcurrentEmits = int64(100)
 var cutoverThresholdUS = int64(1_000_000)
 
-func (s *Server) Emit(ctx context.Context, e models.Event) error {
+func (s *Server) Emit(ctx context.Context, e *models.Event, asJSON, compBytes []byte) error {
 	ctx, span := tracer.Start(ctx, "Emit")
 	defer span.End()
 
@@ -81,14 +78,7 @@ func (s *Server) Emit(ctx context.Context, e models.Event) error {
 	defer s.lk.RUnlock()
 
 	eventsEmitted.Inc()
-
-	b, err := json.Marshal(e)
-	if err != nil {
-		log.Error("failed to marshal event", "error", err)
-		return fmt.Errorf("failed to marshal event: %w", err)
-	}
-
-	evtSize := float64(len(b))
+	evtSize := float64(len(asJSON))
 	bytesEmitted.Add(evtSize)
 
 	collection := ""
@@ -96,7 +86,8 @@ func (s *Server) Emit(ctx context.Context, e models.Event) error {
 		collection = e.Commit.Collection
 	}
 
-	getEncodedEvent := func() []byte { return b }
+	getJSONEvent := func() []byte { return asJSON }
+	getCompressedEvent := func() []byte { return compBytes }
 
 	sem := semaphore.NewWeighted(maxConcurrentEmits)
 	for _, sub := range s.Subscribers {
@@ -113,7 +104,14 @@ func (s *Server) Emit(ctx context.Context, e models.Event) error {
 			if sub.cursor != nil && sub.seq < e.TimeUS-cutoverThresholdUS {
 				return
 			}
-			emitToSubscriber(ctx, log, sub, e.TimeUS, e.Did, collection, false, getEncodedEvent)
+
+			// Pick the event valuer for the subscriber
+			getEventBytes := getJSONEvent
+			if sub.compress {
+				getEventBytes = getCompressedEvent
+			}
+
+			emitToSubscriber(ctx, log, sub, e.TimeUS, e.Did, collection, false, getEventBytes)
 		}(sub)
 	}
 
@@ -127,7 +125,7 @@ func (s *Server) Emit(ctx context.Context, e models.Event) error {
 	return nil
 }
 
-func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, timeUS int64, did, collection string, playback bool, getEncodedEvent func() []byte) error {
+func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, timeUS int64, did, collection string, playback bool, getEventBytes func() []byte) error {
 	if !sub.WantsCollection(collection) {
 		return nil
 	}
@@ -143,11 +141,7 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, ti
 		return nil
 	}
 
-	evtBytes := getEncodedEvent()
-	if sub.compress {
-		evtBytes = sub.encoder.EncodeAll(evtBytes, nil)
-	}
-
+	evtBytes := getEventBytes()
 	if playback {
 		// Copy the event bytes so the playback iterator can reuse the buffer
 		evtBytes = append([]byte{}, evtBytes...)
@@ -238,15 +232,6 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, realIP string, compress bool,
 		deliveredCounter:  eventsDelivered.WithLabelValues(realIP),
 		bytesCounter:      bytesDelivered.WithLabelValues(realIP),
 		rl:                rate.NewLimiter(rate.Limit(s.maxSubRate), int(s.maxSubRate)),
-	}
-
-	if compress {
-		encoder, err := zstd.NewWriter(nil)
-		if err != nil {
-			slog.Error("failed to create zstd encoder", "error", err)
-			return nil, fmt.Errorf("failed to create zstd encoder: %w", err)
-		}
-		sub.encoder = encoder
 	}
 
 	s.Subscribers[s.nextSub] = &sub
@@ -375,10 +360,11 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 	if cursor != nil {
 		log.Info("replaying events", "cursor", *cursor)
 		playbackRateLimit := s.maxSubRate * 10
+
 		go func() {
 			for {
-				lastSeq, err := s.Consumer.ReplayEvents(ctx, *cursor, playbackRateLimit, func(ctx context.Context, timeUS int64, did, collection string, getEncodedEvent func() []byte) error {
-					return emitToSubscriber(ctx, log, sub, timeUS, did, collection, true, getEncodedEvent)
+				lastSeq, err := s.Consumer.ReplayEvents(ctx, sub.compress, *cursor, playbackRateLimit, func(ctx context.Context, timeUS int64, did, collection string, getEventBytes func() []byte) error {
+					return emitToSubscriber(ctx, log, sub, timeUS, did, collection, true, getEventBytes)
 				})
 				if err != nil {
 					log.Error("failed to replay events", "error", err)

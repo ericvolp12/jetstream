@@ -33,6 +33,7 @@ type Client struct {
 	config     *ClientConfig
 	logger     *slog.Logger
 	decoder    *zstd.Decoder
+	dictBytes  []byte
 	BytesRead  atomic.Int64
 	EventsRead atomic.Int64
 	shutdown   chan chan struct{}
@@ -50,7 +51,7 @@ func DefaultClientConfig() *ClientConfig {
 	}
 }
 
-func NewClient(config *ClientConfig, logger *slog.Logger, scheduler Scheduler) (*Client, error) {
+func NewClient(config *ClientConfig, logger *slog.Logger, scheduler Scheduler, dictBytes []byte) (*Client, error) {
 	if config == nil {
 		config = DefaultClientConfig()
 	}
@@ -64,11 +65,12 @@ func NewClient(config *ClientConfig, logger *slog.Logger, scheduler Scheduler) (
 	}
 
 	if config.Compress {
-		dec, err := zstd.NewReader(nil)
+		c.config.ExtraHeaders["Accept-Encoding"] = "zstd"
+		c.dictBytes = dictBytes
+		dec, err := zstd.NewReader(nil, zstd.WithDecoderDicts(dictBytes))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create zstd decoder: %w", err)
 		}
-		c.config.ExtraHeaders["Accept-Encoding"] = "zstd"
 		c.decoder = dec
 	}
 

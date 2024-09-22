@@ -54,7 +54,7 @@ func (c *Consumer) WriteCursor(ctx context.Context) error {
 	}
 
 	// Write the cursor JSON to pebble
-	err = c.DB.Set(cursorKey, data, pebble.Sync)
+	err = c.UncompressedDB.Set(cursorKey, data, pebble.Sync)
 	if err != nil {
 		return fmt.Errorf("failed to write cursor to pebble: %w", err)
 	}
@@ -68,7 +68,7 @@ func (c *Consumer) ReadCursor(ctx context.Context) error {
 	defer span.End()
 
 	// Read the cursor from pebble
-	data, closer, err := c.DB.Get(cursorKey)
+	data, closer, err := c.UncompressedDB.Get(cursorKey)
 	if err != nil {
 		if err == pebble.ErrNotFound {
 			return nil
@@ -87,16 +87,9 @@ func (c *Consumer) ReadCursor(ctx context.Context) error {
 }
 
 // PersistEvent persists an event to PebbleDB
-func (c *Consumer) PersistEvent(ctx context.Context, evt *models.Event) error {
+func (c *Consumer) PersistEvent(ctx context.Context, evt *models.Event, asJSON, compBytes []byte) error {
 	ctx, span := tracer.Start(ctx, "PersistEvent")
 	defer span.End()
-
-	// Persist the event to PebbleDB
-	data, err := json.Marshal(evt)
-	if err != nil {
-		log.Error("failed to marshal event", "error", err)
-		return fmt.Errorf("failed to marshal event: %w", err)
-	}
 
 	// Key structure for events in PebbleDB
 	// {{event_time_us}}_{{repo}}_{{collection}}
@@ -107,10 +100,18 @@ func (c *Consumer) PersistEvent(ctx context.Context, evt *models.Event) error {
 		key = []byte(fmt.Sprintf("%d_%s", evt.TimeUS, evt.Did))
 	}
 
-	err = c.DB.Set(key, data, pebble.NoSync)
+	// Write the event to the uncompressed DB
+	err := c.UncompressedDB.Set(key, asJSON, pebble.NoSync)
 	if err != nil {
 		log.Error("failed to write event to pebble", "error", err)
 		return fmt.Errorf("failed to write event to pebble: %w", err)
+	}
+
+	// Compress the event and write it to the compressed DB
+	err = c.CompressedDB.Set(key, compBytes, pebble.NoSync)
+	if err != nil {
+		log.Error("failed to write compressed event to pebble", "error", err)
+		return fmt.Errorf("failed to write compressed event to pebble: %w", err)
 	}
 
 	return nil
@@ -127,10 +128,17 @@ func (c *Consumer) TrimEvents(ctx context.Context) error {
 	trimKey := []byte(fmt.Sprintf("%d", trimUntil))
 
 	// Delete all numeric keys older than the trim key
-	err := c.DB.DeleteRange([]byte("0"), trimKey, pebble.Sync)
+	err := c.UncompressedDB.DeleteRange([]byte("0"), trimKey, pebble.Sync)
 	if err != nil {
 		log.Error("failed to delete old events", "error", err)
 		return fmt.Errorf("failed to delete old events: %w", err)
+	}
+
+	// Delete all numeric keys older than the trim key in the compressed DB
+	err = c.CompressedDB.DeleteRange([]byte("0"), trimKey, pebble.Sync)
+	if err != nil {
+		log.Error("failed to delete old compressed events", "error", err)
+		return fmt.Errorf("failed to delete old compressed events: %w", err)
 	}
 
 	return nil
@@ -140,7 +148,7 @@ func (c *Consumer) TrimEvents(ctx context.Context) error {
 var finalKey = []byte("9700000000000000")
 
 // ReplayEvents replays events from PebbleDB
-func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateLimit float64, emit func(context.Context, int64, string, string, func() []byte) error) (int64, error) {
+func (c *Consumer) ReplayEvents(ctx context.Context, compressed bool, cursor int64, playbackRateLimit float64, emit func(context.Context, int64, string, string, func() []byte) error) (int64, error) {
 	ctx, span := tracer.Start(ctx, "ReplayEvents")
 	defer span.End()
 
@@ -149,10 +157,19 @@ func (c *Consumer) ReplayEvents(ctx context.Context, cursor int64, playbackRateL
 	limiter := rate.NewLimiter(rate.Limit(playbackRateLimit), int(playbackRateLimit))
 
 	// Iterate over all events starting from the cursor
-	iter, err := c.DB.NewIterWithContext(ctx, &pebble.IterOptions{
+	var iter *pebble.Iterator
+	var err error
+
+	iterOptions := &pebble.IterOptions{
 		LowerBound: []byte(fmt.Sprintf("%d", cursor)),
 		UpperBound: finalKey,
-	})
+	}
+
+	if compressed {
+		iter, err = c.CompressedDB.NewIterWithContext(ctx, iterOptions)
+	} else {
+		iter, err = c.UncompressedDB.NewIterWithContext(ctx, iterOptions)
+	}
 	if err != nil {
 		log.Error("failed to create iterator", "error", err)
 		return 0, fmt.Errorf("failed to create iterator: %w", err)
