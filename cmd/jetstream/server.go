@@ -16,6 +16,7 @@ import (
 	"github.com/bluesky-social/jetstream/pkg/models"
 	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
+	"github.com/klauspost/compress/zstd"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/semaphore"
@@ -39,12 +40,14 @@ type Subscriber struct {
 	id               int64
 	cLk              sync.Mutex
 	cursor           *int64
+	compress         bool
 	deliveredCounter prometheus.Counter
 	bytesCounter     prometheus.Counter
 	// wantedCollections is nil if the subscriber wants all collections
 	wantedCollections *WantedCollections
 	wantedDids        map[string]struct{}
 	rl                *rate.Limiter
+	encoder           *zstd.Encoder
 }
 
 type Server struct {
@@ -141,6 +144,10 @@ func emitToSubscriber(ctx context.Context, log *slog.Logger, sub *Subscriber, ti
 	}
 
 	evtBytes := getEncodedEvent()
+	if sub.compress {
+		evtBytes = sub.encoder.EncodeAll(evtBytes, nil)
+	}
+
 	if playback {
 		// Copy the event bytes so the playback iterator can reuse the buffer
 		evtBytes = append([]byte{}, evtBytes...)
@@ -191,7 +198,7 @@ func (s *Server) GetSeq() int64 {
 	return s.seq
 }
 
-func (s *Server) AddSubscriber(ws *websocket.Conn, realIP string, wantedCollectionPrefixes []string, wantedCollections []string, wantedDids []string, cursor *int64) *Subscriber {
+func (s *Server) AddSubscriber(ws *websocket.Conn, realIP string, compress bool, wantedCollectionPrefixes []string, wantedCollections []string, wantedDids []string, cursor *int64) (*Subscriber, error) {
 	s.lk.Lock()
 	defer s.lk.Unlock()
 
@@ -227,9 +234,19 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, realIP string, wantedCollecti
 		wantedCollections: wantedCol,
 		wantedDids:        didMap,
 		cursor:            cursor,
+		compress:          compress,
 		deliveredCounter:  eventsDelivered.WithLabelValues(realIP),
 		bytesCounter:      bytesDelivered.WithLabelValues(realIP),
 		rl:                rate.NewLimiter(rate.Limit(s.maxSubRate), int(s.maxSubRate)),
+	}
+
+	if compress {
+		encoder, err := zstd.NewWriter(nil)
+		if err != nil {
+			slog.Error("failed to create zstd encoder", "error", err)
+			return nil, fmt.Errorf("failed to create zstd encoder: %w", err)
+		}
+		sub.encoder = encoder
 	}
 
 	s.Subscribers[s.nextSub] = &sub
@@ -242,9 +259,11 @@ func (s *Server) AddSubscriber(ws *websocket.Conn, realIP string, wantedCollecti
 		"id", sub.id,
 		"wantedCollections", wantedCol,
 		"wantedDids", wantedDids,
+		"cursor", cursor,
+		"compress", compress,
 	)
 
-	return &sub
+	return &sub, nil
 }
 
 func (s *Server) RemoveSubscriber(num int64) {
@@ -306,6 +325,10 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		return fmt.Errorf("too many wanted DIDs")
 	}
 
+	// Check if the user wants zstd compression
+	acceptEncoding := c.Request().Header.Get("Accept-Encoding")
+	compress := strings.Contains(acceptEncoding, "zstd")
+
 	var cursor *int64
 	var err error
 	qCursor := c.Request().URL.Query().Get("cursor")
@@ -342,7 +365,11 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 		}
 	}()
 
-	sub := s.AddSubscriber(ws, c.RealIP(), wantedCollectionPrefixes, wantedCollections, wantedDids, cursor)
+	sub, err := s.AddSubscriber(ws, c.RealIP(), compress, wantedCollectionPrefixes, wantedCollections, wantedDids, cursor)
+	if err != nil {
+		log.Error("failed to add subscriber", "error", err)
+		return err
+	}
 	defer s.RemoveSubscriber(sub.id)
 
 	if cursor != nil {
@@ -390,6 +417,16 @@ func (s *Server) HandleSubscribe(c echo.Context) error {
 				log.Error("failed to wait for rate limiter", "error", err)
 				return fmt.Errorf("failed to wait for rate limiter: %w", err)
 			}
+
+			// When compression is enabled, the buffer contains the compressed message
+			if compress {
+				if err := ws.WriteMessage(websocket.BinaryMessage, *msg); err != nil {
+					log.Error("failed to write message to websocket", "error", err)
+					return nil
+				}
+				continue
+			}
+
 			if err := ws.WriteMessage(websocket.TextMessage, *msg); err != nil {
 				log.Error("failed to write message to websocket", "error", err)
 				return nil

@@ -11,3 +11,4 @@ services:
       - ./data:/data
     environment:
       - JETSTREAM_DATA_DIR=/data
+      - JETSTREAM_MAX_SUB_RATE=1_000_000
