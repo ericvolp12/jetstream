@@ -3,8 +3,13 @@ package models
 import (
 	"github.com/goccy/go-json"
 
+	_ "embed"
+
 	comatproto "github.com/bluesky-social/indigo/api/atproto"
 )
+
+//go:embed zstd_dictionary
+var ZSTDDictionary []byte
 
 type Event struct {
 	Did       string                                  `json:"did"`

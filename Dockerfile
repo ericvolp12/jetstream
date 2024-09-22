@@ -32,8 +32,5 @@ COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certifica
 # Copy the binary from the first stage.
 COPY --from=builder /app/jetstream .
 
-# Copy the zstd dictionary
-COPY zstd-dictionary /zstd-dictionary
-
 # Set the startup command to run the binary
 CMD ["./jetstream"]

@@ -51,7 +51,6 @@ func NewConsumer(
 	socketURL string,
 	dataDir string,
 	eventTTL time.Duration,
-	encoder *zstd.Encoder,
 	emit func(context.Context, *models.Event, []byte, []byte) error,
 ) (*Consumer, error) {
 	uDBPath := dataDir + "/jetstream.uncompressed.db"
@@ -71,6 +70,11 @@ func NewConsumer(
 	clock, err := monotonic.NewClock(time.Microsecond)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create clock: %w", err)
+	}
+
+	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderDict(models.ZSTDDictionary))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create zstd encoder: %w", err)
 	}
 
 	c := Consumer{

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"log/slog"
 	"os"
@@ -28,19 +27,6 @@ func main() {
 	})))
 	logger := slog.Default()
 
-	// Open the zstd dictionary file if it is set
-	f, err := os.Open("zstd-dictionary")
-	if err != nil {
-		log.Fatalf("failed to open zstd dictionary file: %v", err)
-	}
-
-	dictBytes, err := io.ReadAll(f)
-	if err != nil {
-		f.Close()
-		log.Fatalf("failed to read zstd dictionary file: %v", err)
-	}
-	f.Close()
-
 	config := client.DefaultClientConfig()
 	config.WebsocketURL = serverAddr
 	config.Compress = true
@@ -51,7 +37,7 @@ func main() {
 
 	scheduler := sequential.NewScheduler("jetstream_localdev", logger, h.HandleEvent)
 
-	c, err := client.NewClient(config, logger, scheduler, dictBytes)
+	c, err := client.NewClient(config, logger, scheduler)
 	if err != nil {
 		log.Fatalf("failed to create client: %v", err)
 	}

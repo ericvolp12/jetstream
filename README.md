@@ -40,6 +40,16 @@ The following Query Parameters are supported:
   - An absent cursor or a cursor from the future will result in live-tail operation
   - When reconnecting, use the `time_us` from your most recently processed event and maybe provide a negative buffer (i.e. subtract a few seconds) to ensure gapless playback
 
+### Compression
+
+Jetstream supports `zstd`-based compression of messages. Jetstream uses a custom dictionary for compression that can be found in `pkg/models/zstd_dictionary` and is required to decode compressed messages from the server.
+
+`zstd` compressed Jetstream messages are ~56% smaller on average than the raw JSON version of the Jetstream firehose.
+
+The provided client library uses compression by default, using an embedded copy of the Dictionary from the `models` package.
+
+### Examples
+
 A simple example that hits the public instance looks like:
 
 ```bash

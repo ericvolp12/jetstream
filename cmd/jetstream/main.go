@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"log/slog"
 	"net/http"
@@ -19,7 +18,6 @@ import (
 	"github.com/bluesky-social/indigo/events/schedulers/parallel"
 	"github.com/bluesky-social/jetstream/pkg/consumer"
 	"github.com/gorilla/websocket"
-	"github.com/klauspost/compress/zstd"
 	"github.com/labstack/echo/v4"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
@@ -121,35 +119,6 @@ func Jetstream(cctx *cli.Context) error {
 		return fmt.Errorf("failed to parse ws-url: %w", err)
 	}
 
-	// Open the zstd dictionary file if it is set
-	var dictBytes []byte
-	if cctx.String("zstd-dictionary-path") != "" {
-		f, err := os.Open(cctx.String("zstd-dictionary-path"))
-		if err != nil {
-			return fmt.Errorf("failed to open zstd dictionary file: %w", err)
-		}
-
-		dictBytes, err = io.ReadAll(f)
-		if err != nil {
-			f.Close()
-			return fmt.Errorf("failed to read zstd dictionary file: %w", err)
-		}
-		f.Close()
-	}
-
-	var enc *zstd.Encoder
-	if len(dictBytes) > 0 {
-		enc, err = zstd.NewWriter(nil, zstd.WithEncoderDict(dictBytes))
-		if err != nil {
-			return fmt.Errorf("failed to create zstd encoder: %w", err)
-		}
-	} else {
-		enc, err = zstd.NewWriter(nil)
-		if err != nil {
-			return fmt.Errorf("failed to create zstd encoder: %w", err)
-		}
-	}
-
 	s, err := NewServer(cctx.Float64("max-sub-rate"))
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
@@ -161,7 +130,6 @@ func Jetstream(cctx *cli.Context) error {
 		u.String(),
 		cctx.String("data-dir"),
 		cctx.Duration("event-ttl"),
-		enc,
 		s.Emit,
 	)
 	if err != nil {
