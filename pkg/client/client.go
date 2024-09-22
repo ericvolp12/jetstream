@@ -7,12 +7,15 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/ericvolp12/jetstream/pkg/models"
+	"github.com/bluesky-social/jetstream/pkg/models"
 	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
+	"github.com/klauspost/compress/zstd"
+	"go.uber.org/atomic"
 )
 
 type ClientConfig struct {
+	Compress          bool
 	WebsocketURL      string
 	WantedDids        []string
 	WantedCollections []string
@@ -25,15 +28,19 @@ type Scheduler interface {
 }
 
 type Client struct {
-	Scheduler Scheduler
-	con       *websocket.Conn
-	config    *ClientConfig
-	logger    *slog.Logger
-	shutdown  chan chan struct{}
+	Scheduler  Scheduler
+	con        *websocket.Conn
+	config     *ClientConfig
+	logger     *slog.Logger
+	decoder    *zstd.Decoder
+	BytesRead  atomic.Int64
+	EventsRead atomic.Int64
+	shutdown   chan chan struct{}
 }
 
 func DefaultClientConfig() *ClientConfig {
 	return &ClientConfig{
+		Compress:          true,
 		WebsocketURL:      "ws://localhost:6008/subscribe",
 		WantedDids:        []string{},
 		WantedCollections: []string{},
@@ -49,12 +56,23 @@ func NewClient(config *ClientConfig, logger *slog.Logger, scheduler Scheduler) (
 	}
 
 	logger = logger.With("component", "jetstream-client")
-	return &Client{
+	c := Client{
 		config:    config,
 		shutdown:  make(chan chan struct{}),
 		logger:    logger,
 		Scheduler: scheduler,
-	}, nil
+	}
+
+	if config.Compress {
+		c.config.ExtraHeaders["Accept-Encoding"] = "zstd"
+		dec, err := zstd.NewReader(nil, zstd.WithDecoderDicts(models.ZSTDDictionary))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create zstd decoder: %w", err)
+		}
+		c.decoder = dec
+	}
+
+	return &c, nil
 }
 
 func (c *Client) ConnectAndRead(ctx context.Context, cursor *int64) error {
@@ -109,6 +127,9 @@ func (c *Client) ConnectAndRead(ctx context.Context, cursor *int64) error {
 func (c *Client) readLoop(ctx context.Context) error {
 	c.logger.Info("starting websocket read loop")
 
+	bytesRead := bytesRead.WithLabelValues(c.config.WebsocketURL)
+	eventsRead := eventsRead.WithLabelValues(c.config.WebsocketURL)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -123,6 +144,21 @@ func (c *Client) readLoop(ctx context.Context) error {
 			if err != nil {
 				c.logger.Error("failed to read message from websocket", "error", err)
 				return fmt.Errorf("failed to read message from websocket: %w", err)
+			}
+
+			bytesRead.Add(float64(len(msg)))
+			eventsRead.Inc()
+			c.BytesRead.Add(int64(len(msg)))
+			c.EventsRead.Inc()
+
+			// Decompress the message if necessary
+			if c.decoder != nil && c.config.Compress {
+				m, err := c.decoder.DecodeAll(msg, nil)
+				if err != nil {
+					c.logger.Error("failed to decompress message", "error", err)
+					return fmt.Errorf("failed to decompress message: %w", err)
+				}
+				msg = m
 			}
 
 			// Unpack the message and pass it to the handler

@@ -2,15 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
 	"os"
 	"time"
 
-	"github.com/ericvolp12/jetstream/pkg/client"
-	"github.com/ericvolp12/jetstream/pkg/client/schedulers/sequential"
-	"github.com/ericvolp12/jetstream/pkg/models"
+	apibsky "github.com/bluesky-social/indigo/api/bsky"
+	"github.com/bluesky-social/jetstream/pkg/client"
+	"github.com/bluesky-social/jetstream/pkg/client/schedulers/sequential"
+	"github.com/bluesky-social/jetstream/pkg/models"
 )
 
 const (
@@ -27,6 +29,7 @@ func main() {
 
 	config := client.DefaultClientConfig()
 	config.WebsocketURL = serverAddr
+	config.Compress = true
 
 	h := &handler{
 		seenSeqs: make(map[int64]struct{}),
@@ -39,7 +42,21 @@ func main() {
 		log.Fatalf("failed to create client: %v", err)
 	}
 
-	cursor := time.Now().Add(1 * -time.Hour).UnixMicro()
+	cursor := time.Now().Add(5 * -time.Hour).UnixMicro()
+
+	// Every 5 seconds print the events read and bytes read and average event size
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		for {
+			select {
+			case <-ticker.C:
+				eventsRead := c.EventsRead.Load()
+				bytesRead := c.BytesRead.Load()
+				avgEventSize := bytesRead / eventsRead
+				logger.Info("stats", "events_read", eventsRead, "bytes_read", bytesRead, "avg_event_size", avgEventSize)
+			}
+		}
+	}()
 
 	if err := c.ConnectAndRead(ctx, &cursor); err != nil {
 		log.Fatalf("failed to connect: %v", err)
@@ -54,19 +71,19 @@ type handler struct {
 }
 
 func (h *handler) HandleEvent(ctx context.Context, event *models.Event) error {
-	fmt.Println("evt")
+	// fmt.Println("evt")
 
 	// Unmarshal the record if there is one
-	// if event.Commit != nil && (event.Commit.OpType == models.CommitCreateRecord || event.Commit.OpType == models.CommitUpdateRecord) {
-	// 	switch event.Commit.Collection {
-	// 	case "app.bsky.feed.post":
-	// 		var post apibsky.FeedPost
-	// 		if err := json.Unmarshal(event.Commit.Record, &post); err != nil {
-	// 			return fmt.Errorf("failed to unmarshal post: %w", err)
-	// 		}
-	// 		// fmt.Printf("%v |(%s)| %s\n", time.UnixMicro(event.TimeUS).Local().Format("15:04:05"), event.Did, post.Text)
-	// 	}
-	// }
+	if event.Commit != nil && (event.Commit.OpType == models.CommitCreateRecord || event.Commit.OpType == models.CommitUpdateRecord) {
+		switch event.Commit.Collection {
+		case "app.bsky.feed.post":
+			var post apibsky.FeedPost
+			if err := json.Unmarshal(event.Commit.Record, &post); err != nil {
+				return fmt.Errorf("failed to unmarshal post: %w", err)
+			}
+			// fmt.Printf("%v |(%s)| %s\n", time.UnixMicro(event.TimeUS).Local().Format("15:04:05"), event.Did, post.Text)
+		}
+	}
 
 	return nil
 }

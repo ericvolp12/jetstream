@@ -13,10 +13,11 @@ import (
 	"github.com/bluesky-social/indigo/events"
 	"github.com/bluesky-social/indigo/repo"
 	"github.com/bluesky-social/indigo/repomgr"
+	"github.com/bluesky-social/jetstream/pkg/models"
+	"github.com/bluesky-social/jetstream/pkg/monotonic"
 	"github.com/cockroachdb/pebble"
-	"github.com/ericvolp12/jetstream/pkg/models"
-	"github.com/ericvolp12/jetstream/pkg/monotonic"
 	"github.com/goccy/go-json"
+	"github.com/klauspost/compress/zstd"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -26,8 +27,10 @@ import (
 type Consumer struct {
 	SocketURL         string
 	Progress          *Progress
-	Emit              func(context.Context, models.Event) error
-	DB                *pebble.DB
+	Emit              func(context.Context, *models.Event, []byte, []byte) error
+	UncompressedDB    *pebble.DB
+	CompressedDB      *pebble.DB
+	encoder           *zstd.Encoder
 	EventTTL          time.Duration
 	logger            *slog.Logger
 	clock             *monotonic.Clock
@@ -48,10 +51,16 @@ func NewConsumer(
 	socketURL string,
 	dataDir string,
 	eventTTL time.Duration,
-	emit func(context.Context, models.Event) error,
+	emit func(context.Context, *models.Event, []byte, []byte) error,
 ) (*Consumer, error) {
-	dbPath := dataDir + "/jetstream.db"
-	db, err := pebble.Open(dbPath, &pebble.Options{})
+	uDBPath := dataDir + "/jetstream.uncompressed.db"
+	uDB, err := pebble.Open(uDBPath, &pebble.Options{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to open db: %w", err)
+	}
+
+	cDBPath := dataDir + "/jetstream.compressed.db"
+	cDB, err := pebble.Open(cDBPath, &pebble.Options{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open db: %w", err)
 	}
@@ -63,6 +72,11 @@ func NewConsumer(
 		return nil, fmt.Errorf("failed to create clock: %w", err)
 	}
 
+	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderDict(models.ZSTDDictionary))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create zstd encoder: %w", err)
+	}
+
 	c := Consumer{
 		SocketURL: socketURL,
 		Progress: &Progress{
@@ -70,7 +84,9 @@ func NewConsumer(
 		},
 		EventTTL:          eventTTL,
 		Emit:              emit,
-		DB:                db,
+		UncompressedDB:    uDB,
+		CompressedDB:      cDB,
+		encoder:           encoder,
 		logger:            log,
 		clock:             clock,
 		buf:               make(chan *models.Event, 10_000),
@@ -325,12 +341,21 @@ func (c *Consumer) RunSequencer(ctx context.Context) error {
 				// Assign a time_us to the event
 				e.TimeUS = c.clock.Now()
 				c.sequenced.Inc()
-				if err := c.PersistEvent(ctx, e); err != nil {
+
+				// Encode the event in JSON and compress it
+				asJSON, err := json.Marshal(e)
+				if err != nil {
+					log.Error("failed to marshal event", "error", err)
+					return
+				}
+				compBytes := c.encoder.EncodeAll(asJSON, nil)
+
+				if err := c.PersistEvent(ctx, e, asJSON, compBytes); err != nil {
 					log.Error("failed to persist event", "error", err)
 					return
 				}
 				c.persisted.Inc()
-				if err := c.Emit(ctx, *e); err != nil {
+				if err := c.Emit(ctx, e, asJSON, compBytes); err != nil {
 					log.Error("failed to emit event", "error", err)
 				}
 				c.emitted.Inc()
